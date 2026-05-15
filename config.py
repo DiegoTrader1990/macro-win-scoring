@@ -73,6 +73,17 @@ DUAL_SOURCE_ASSETS = {
 }
 
 # ============================================================
+# TRACKING DO WIN PARA DIVERGÊNCIA
+# ============================================================
+WIN_TRACKING = {
+    "mt5_symbol": "WINN25",
+    "yf_symbol": "EWZ",          # Fallback: usa EWZ como proxy
+    "yf_direct": "^BVSP",        # Alternativa: Ibovespa direto
+    "enabled": True,
+    "min_periods_for_trend": 5,
+}
+
+# ============================================================
 # PESOS DO SCORING MACRO
 # ============================================================
 MACRO_WEIGHTS = {
@@ -178,31 +189,27 @@ DASHBOARD_CONFIG = {
 }
 
 # ============================================================
+# CONFIGURAÇÃO DE DIVERGÊNCIA
+# ============================================================
+DIVERGENCE_CONFIG = {
+    "enabled": True,
+    "divergence_periods": 20,
+    "divergence_min_periods": 5,
+    "divergence_score_threshold": 3,
+    "divergence_win_threshold_pct": 0.1,
+}
+
+# ============================================================
 # CONFIGURAÇÃO DE LOGS
 # ============================================================
 LOG_CONFIG = {
-    # Diretório onde os logs serão salvos
     "log_dir": "logs",
-
-    # Arquivo de log de scoring (CSV - uma linha por leitura)
     "score_log_file": "score_log.csv",
-
-    # Arquivo de log de ativos (CSV - uma linha por ativo por leitura)
     "asset_log_file": "asset_log.csv",
-
-    # Arquivo de log de sinais (CSV - gatilhos de entrada)
     "signal_log_file": "signal_log.csv",
-
-    # Arquivo de log de sessão (JSONL - eventos da sessão)
     "session_log_file": "session_log.jsonl",
-
-    # Rotação: quantos dias manter logs antigos
     "retention_days": 90,
-
-    # Salvar log a cada N leituras (1 = toda leitura)
     "log_every_n_reads": 1,
-
-    # Ativar/desativar logs individuais
     "enable_score_log": True,
     "enable_asset_log": True,
     "enable_signal_log": True,

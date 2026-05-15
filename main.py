@@ -15,10 +15,14 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import MT5_CONFIG, DUAL_SOURCE_ASSETS, YF_SYMBOLS, MACRO_WEIGHTS, SIGNAL_CONFIG, LOG_CONFIG
+from config import (
+    MT5_CONFIG, DUAL_SOURCE_ASSETS, YF_SYMBOLS, MACRO_WEIGHTS,
+    SIGNAL_CONFIG, LOG_CONFIG, WIN_TRACKING, DIVERGENCE_CONFIG
+)
 from data_sources.data_manager import DataManager
 from scoring.macro_score import MacroScorer
 from scoring.delta import DeltaAnalyzer
+from scoring.divergence import DivergenceDetector
 from utils.helpers import format_change, format_price, get_score_color, get_score_bar
 from utils.macro_logger import MacroLogger
 
@@ -32,35 +36,43 @@ logger = logging.getLogger(__name__)
 
 def print_header():
     print("\n" + "=" * 70)
-    print("  SISTEMA DE MACRO SCORING - MINI INDICE (WIN)")
+    print("  SISTEMA DE MACRO SCORING - MINI INDICE (WIN) v2.0")
     print("  MT5 (Rico) -> Yahoo Finance Fallback")
     print("=" * 70)
 
 
-def print_score(score_result: dict, delta_result: dict = None):
+def print_score(score_result: dict, delta_result: dict = None, divergence: dict = None):
     score = score_result.get("score", 0)
     signal = score_result.get("signal", {})
     
     print(f"\n  {'─' * 66}")
     print(f"  SCORE MACRO: {score:+.1f} {get_score_bar(score)}")
-    print(f"  SINAL: {signal.get('emoji', '⚪')} {signal.get('label', 'N/A')}")
+    print(f"  SINAL: {signal.get('label', 'N/A')} ({signal.get('confidence', '')})")
     print(f"  ACAO: {signal.get('action', 'N/A')}")
     
     if delta_result:
         entry = delta_result.get("entry_signal", {})
         delta = delta_result.get("delta", 0)
         momentum = delta_result.get("momentum", 0)
+        confluence = delta_result.get("confluence", {})
         
         print(f"  DELTA: {delta:+.1f} | MOMENTUM: {momentum:+.1f}")
-        print(f"  ENTRADA: {entry.get('emoji', '⚪')} {entry.get('label', 'N/A')}")
-        print(f"  CONFIANCA: {entry.get('confidence', 'N/A')}")
+        print(f"  ENTRADA: {entry.get('label', 'N/A')} ({entry.get('confidence', '')})")
+        
+        if confluence.get("score_delta_aligned"):
+            print(f"  *** CONFLUENCIA SCORE+DELTA ***")
+        if confluence.get("reversal_detected"):
+            print(f"  *** REVERSAO DETECTADA ***")
+
+    if divergence and divergence.get("type") not in ("INDEFINIDO",):
+        div_color = "!!" if "DIVERGENCIA" in divergence.get("type", "") else ">>"
+        print(f"  {div_color} {divergence.get('label', '')} - {divergence.get('description', '')[:60]}")
     
     print(f"  {'─' * 66}")
 
 
 def print_categories(score_result: dict):
     category_scores = score_result.get("category_scores", {})
-    
     print(f"\n  BREAKDOWN POR CATEGORIA:")
     for cat_name, cat_data in category_scores.items():
         normalized = cat_data.get("normalized", 0)
@@ -70,7 +82,6 @@ def print_categories(score_result: dict):
 
 def print_assets(score_result: dict):
     asset_signals = score_result.get("asset_signals", {})
-    
     print(f"\n  ATIVOS:")
     print(f"    {'Ativo':15s} {'Preco':>12s} {'Variacao':>10s} {'Direcao':>10s} {'Contrib':>10s} {'Fonte':>6s}")
     print(f"    {'─' * 65}")
@@ -84,7 +95,7 @@ def print_assets(score_result: dict):
     for name, data in sorted_assets:
         price = format_price(data.get("current_price"))
         change = format_change(data.get("change_pct"))
-        direction = "↑" if data.get("direction", 1) > 0 else "↓"
+        direction = "DIRETA" if data.get("direction", 1) > 0 else "INVERSA"
         contribution = f"{data.get('contribution', 0):+.4f}"
         source = "MT5" if "mt5" in data.get("source", "") else "YF"
         
@@ -99,10 +110,12 @@ def main():
         mt5_config=MT5_CONFIG,
         dual_source=DUAL_SOURCE_ASSETS,
         yf_only=YF_SYMBOLS,
+        win_tracking=WIN_TRACKING,
     )
     
     scorer = MacroScorer(MACRO_WEIGHTS, SIGNAL_CONFIG)
     delta_analyzer = DeltaAnalyzer(SIGNAL_CONFIG)
+    divergence_detector = DivergenceDetector(DIVERGENCE_CONFIG)
     macro_logger = MacroLogger(LOG_CONFIG)
     
     # Tenta conectar MT5
@@ -133,11 +146,24 @@ def main():
             
             delta_analyzer.update(score_result["score"])
             delta_result = delta_analyzer.get_entry_signal(score_result)
+
+            # Divergence
+            divergence_detector.update_score(score_result["score"])
+            win_data = all_data.get("WIN") or all_data.get("EWZ")
+            if win_data and win_data.get("current_price"):
+                divergence_detector.update_win_price(win_data["current_price"])
+            divergence = divergence_detector.check_divergence()
             
             # GRAVA LOGS
             macro_logger.log_full_cycle(score_result, delta_result, all_data)
+            if divergence and divergence.get("type") not in ("INDEFINIDO", "NEUTRO"):
+                macro_logger._log_session_event("DIVERGENCE", {
+                    "type": divergence["type"],
+                    "label": divergence["label"],
+                    "severity": divergence["severity"],
+                })
             
-            print_score(score_result, delta_result)
+            print_score(score_result, delta_result, divergence)
             print_categories(score_result)
             print_assets(score_result)
             

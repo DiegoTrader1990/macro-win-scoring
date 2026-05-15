@@ -3,6 +3,7 @@ Gerenciador de Dados - MT5 (Primário) + Yahoo Finance (Fallback)
 =================================================================
 Tenta buscar dados primeiro no MT5 (Rico), e se não conseguir,
 usa Yahoo Finance como fallback automaticamente.
+Inclui tracking do preço WIN para detecção de divergência.
 """
 
 import logging
@@ -22,18 +23,12 @@ class DataManager:
     Fluxo:
     1. Para ativos B3: tenta MT5 primeiro, depois Yahoo Finance
     2. Para ativos macro internacionais: vai direto ao Yahoo Finance
-    3. Combina todos os dados para alimentar o scoring
+    3. Para WIN: busca separadamente para divergência
+    4. Combina todos os dados para alimentar o scoring
     """
     
     def __init__(self, mt5_config: dict = None, dual_source: dict = None,
-                 yf_only: dict = None, mt5_only: dict = None):
-        """
-        Args:
-            mt5_config: Configuração do MT5
-            dual_source: Ativos disponíveis em MT5 e YF {nome: {mt5: symbol, yf: symbol}}
-            yf_only: Ativos só no Yahoo Finance {nome: ticker_yf}
-            mt5_only: Ativos só no MT5 {nome: ticker_mt5}
-        """
+                 yf_only: dict = None, mt5_only: dict = None, win_tracking: dict = None):
         self.mt5 = MT5Source(mt5_config or {})
         self.yf = YahooFinanceSource()
         self.yf_batch = YahooFinanceBatch()
@@ -41,25 +36,21 @@ class DataManager:
         self.dual_source = dual_source or {}
         self.yf_only = yf_only or {}
         self.mt5_only = mt5_only or {}
+        self.win_tracking = win_tracking or {}
         
         self._mt5_connected = False
         self._last_data = {}
         self._last_update = None
     
     def connect_mt5(self) -> tuple:
-        """
-        Tenta conectar ao MT5.
-        
-        Returns:
-            Tuple (sucesso: bool, mensagem: str)
-        """
+        """Tenta conectar ao MT5. Returns: Tuple (sucesso, mensagem)."""
         success = self.mt5.connect()
         self._mt5_connected = success
         
         if success:
             return True, "MT5 conectado com sucesso!"
         else:
-            return False, "MT5 não disponível. Usando Yahoo Finance como fallback para todos os ativos."
+            return False, "MT5 nao disponivel. Usando Yahoo Finance como fallback."
     
     def disconnect_mt5(self):
         """Desconecta do MT5."""
@@ -70,9 +61,41 @@ class DataManager:
         """Verifica se MT5 está conectado."""
         return self._mt5_connected and self.mt5.is_available()
     
+    def get_win_data(self) -> Optional[dict]:
+        """
+        Busca dados do WIN para detecção de divergência.
+        Tenta MT5 primeiro, depois Yahoo Finance (proxy).
+        
+        Returns:
+            Dict com dados do WIN ou None
+        """
+        if not self.win_tracking.get("enabled", True):
+            return None
+
+        # Tenta MT5 primeiro
+        mt5_symbol = self.win_tracking.get("mt5_symbol", "WINN25")
+        if self.is_mt5_connected():
+            data = self.mt5.get_asset_data(mt5_symbol)
+            if data:
+                data["internal_name"] = "WIN"
+                data["source_primary"] = "mt5"
+                return data
+
+        # Fallback: usa proxy (EWZ ou IBOV)
+        yf_proxy = self.win_tracking.get("yf_symbol", "EWZ")
+        data = self.yf.get_asset_data(yf_proxy)
+        if data:
+            data["internal_name"] = "WIN_PROXY"
+            data["source_primary"] = "yahoo_finance"
+            data["proxy_for"] = "WIN"
+            data["proxy_symbol"] = yf_proxy
+            return data
+
+        return None
+
     def get_all_data(self) -> Dict[str, dict]:
         """
-        Busca dados de TODOS os ativos configurados.
+        Busca dados de TODOS os ativos configurados + WIN.
         
         Returns:
             Dict {nome_interno: dados_do_ativo}
@@ -92,10 +115,8 @@ class DataManager:
         yf_results = self.yf_batch.download_batch(self.yf_only)
         all_data.update(yf_results)
         
-        # Verifica quais YF não retornaram
         for name in self.yf_only:
             if name not in yf_results:
-                # Tenta individual como fallback
                 try:
                     data = self.yf.get_asset_data(self.yf_only[name])
                     if data:
@@ -117,6 +138,14 @@ class DataManager:
                     errors.append(name)
             else:
                 errors.append(name)
+
+        # ---- 4. WIN para divergência ----
+        win_data = self.get_win_data()
+        if win_data:
+            # Usa "WIN" como chave, mas pode ser proxy
+            name = "WIN" if win_data.get("internal_name") == "WIN" else "EWZ"
+            if name not in all_data:
+                all_data[name] = win_data
         
         self._last_data = all_data
         self._last_update = datetime.now()
@@ -127,20 +156,10 @@ class DataManager:
         return all_data
     
     def _get_dual_source_data(self, name: str, sources: dict) -> Optional[dict]:
-        """
-        Busca dados de um ativo dual source: MT5 primeiro, YF como fallback.
-        
-        Args:
-            name: Nome interno do ativo
-            sources: Dict com {"mt5": symbol_mt5, "yf": symbol_yf}
-        
-        Returns:
-            Dict com dados do ativo ou None
-        """
+        """Busca dados de um ativo dual source: MT5 primeiro, YF como fallback."""
         mt5_symbol = sources.get("mt5")
         yf_symbol = sources.get("yf")
         
-        # Tenta MT5 primeiro
         if mt5_symbol and self.is_mt5_connected():
             data = self.mt5.get_asset_data(mt5_symbol)
             if data:
@@ -148,7 +167,6 @@ class DataManager:
                 data["source_primary"] = "mt5"
                 return data
         
-        # Fallback: Yahoo Finance
         if yf_symbol:
             data = self.yf.get_asset_data(yf_symbol)
             if data:
@@ -159,12 +177,7 @@ class DataManager:
         return None
     
     def get_summary(self) -> dict:
-        """
-        Retorna resumo do status das fontes de dados.
-        
-        Returns:
-            Dict com status de cada fonte
-        """
+        """Retorna resumo do status das fontes de dados."""
         return {
             "mt5_connected": self.is_mt5_connected(),
             "yf_available": self.yf.is_available(),
