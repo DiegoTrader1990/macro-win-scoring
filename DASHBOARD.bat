@@ -26,11 +26,15 @@ if %errorlevel% neq 0 (
 
 echo.
 echo Iniciando Painel Compacto (600x1000)...
-echo Navegador: http://localhost:8501
-echo Para PARAR: Ctrl+C ou feche esta janela
 echo.
-echo DICA: Redimensione a janela do navegador para 600px de largura
-echo        e posicione ao lado da sua plataforma de operacao.
+echo IMPORTANTE:
+echo   1. O navegador vai abrir em http://localhost:8501
+echo   2. Redimensione a janela para 600px de largura
+echo   3. Posicione ao lado da sua plataforma de operacao
+echo   4. Para PARAR: Ctrl+C ou feche esta janela
+echo.
+echo Os logs ficam salvos na pasta: logs\
+echo Use: python analyze_logs.py para analisar os logs
 echo.
 
 streamlit run dashboard/app.py --server.headless true --browser.gatherUsageStats false

@@ -11,6 +11,7 @@ Exemplo: python analyze_logs.py 20250515
 
 import sys
 import os
+import json
 import glob
 from datetime import date, datetime, timedelta
 
@@ -65,7 +66,7 @@ def load_logs(log_dir: str = "logs", target_date: str = None) -> dict:
         with open(session_files[0], 'r', encoding='utf-8') as f:
             for line in f:
                 try:
-                    sessions.append(eval(line.strip()))
+                    sessions.append(json.loads(line.strip()))
                 except:
                     pass
         result["session"] = pd.DataFrame(sessions)
@@ -133,8 +134,6 @@ def analyze_asset_contributions(asset_df: pd.DataFrame) -> dict:
         reads=("contribution", "count"),
     ).sort_values("contrib_abs_mean", ascending=False)
 
-    # Quantas vezes cada ativo contribuiu na direção do score
-    # (positivo quando score > 0, negativo quando score < 0)
     return {
         "contributions": contrib_by_asset,
         "top_positive": contrib_by_asset.nlargest(5, "contrib_mean"),
@@ -183,9 +182,6 @@ def analyze_delta_patterns(score_df: pd.DataFrame) -> dict:
     # Quantas vezes delta cruzou zero (reversão)
     zero_crossings = sum(1 for i in range(1, len(deltas)) if deltas[i-1] * deltas[i] < 0)
 
-    # Momentum stats
-    momentums = score_df["momentum"].values if "momentum" in score_df.columns else None
-
     # Score transitions (mudança de zona)
     scores = score_df["score"].values
     zone_changes = 0
@@ -226,14 +222,14 @@ def suggest_optimizations(score_stats: dict, asset_stats: dict, signal_stats: di
         suggestions.append(
             f"ALERTA: {pct_neutro}% das leituras estao na zona NEUTRA. "
             "Considere reduzir thresholds (ex: moderate_bullish de 30 para 20) "
-            "ou aumentar pesos de ativos com maior contribuição absoluta."
+            "ou aumentar pesos de ativos com maior contribuicao absoluta."
         )
 
     # Score muito volátil?
     score_std = score_stats.get("score_std", 0)
     if score_std > 40:
         suggestions.append(
-            f"Score muito volátil (std={score_std}). Considere suavizar com "
+            f"Score muito volatil (std={score_std}). Considere suavizar com "
             "media movel das ultimas 3 leituras antes de gerar sinal."
         )
 
@@ -242,7 +238,7 @@ def suggest_optimizations(score_stats: dict, asset_stats: dict, signal_stats: di
         crossings = delta_stats.get("delta_zero_crossings", 0)
         if crossings > 10:
             suggestions.append(
-                f"Delta cruzou zero {crossings} vezes. Muitas reversões podem gerar "
+                f"Delta cruzou zero {crossings} vezes. Muitas reversoes podem gerar "
                 "falsos sinais. Considere aumentar o threshold de delta (ex: de 5 para 10)."
             )
 
@@ -308,11 +304,11 @@ def print_report(target_date: str = None):
         print(f"  Media: {score_stats['score_mean']} | Std: {score_stats['score_std']}")
         print(f"  Min: {score_stats['score_min']} | Max: {score_stats['score_max']}")
         print(f"\n  ZONAS:")
-        print(f"    Forte Alta (>=60):     {score_stats.get('zona_forte_alta', 0):3d} ({score_stats.get('pct_forte_alta', 0):5.1f}%)")
-        print(f"    Moderada Alta (30-60): {score_stats.get('zona_moderada_alta', 0):3d} ({score_stats.get('pct_moderada_alta', 0):5.1f}%)")
-        print(f"    Neutro (-30 a 30):     {score_stats.get('zona_neutro', 0):3d} ({score_stats.get('pct_neutro', 0):5.1f}%)")
+        print(f"    Forte Alta (>=60):        {score_stats.get('zona_forte_alta', 0):3d} ({score_stats.get('pct_forte_alta', 0):5.1f}%)")
+        print(f"    Moderada Alta (30-60):    {score_stats.get('zona_moderada_alta', 0):3d} ({score_stats.get('pct_moderada_alta', 0):5.1f}%)")
+        print(f"    Neutro (-30 a 30):        {score_stats.get('zona_neutro', 0):3d} ({score_stats.get('pct_neutro', 0):5.1f}%)")
         print(f"    Moderada Baixa (-60--30): {score_stats.get('zona_moderada_baixa', 0):3d} ({score_stats.get('pct_moderada_baixa', 0):5.1f}%)")
-        print(f"    Forte Baixa (<=-60):   {score_stats.get('zona_forte_baixa', 0):3d} ({score_stats.get('pct_forte_baixa', 0):5.1f}%)")
+        print(f"    Forte Baixa (<=-60):      {score_stats.get('zona_forte_baixa', 0):3d} ({score_stats.get('pct_forte_baixa', 0):5.1f}%)")
         print(f"\n  CONFLUENCIA: {score_stats.get('confluence_count', 0)} ({score_stats.get('pct_confluence', 0):.1f}%)")
         print(f"  REVERSOES:   {score_stats.get('reversal_count', 0)} ({score_stats.get('pct_reversal', 0):.1f}%)")
 
@@ -372,6 +368,7 @@ def print_report(target_date: str = None):
     # Exporta análise para CSV
     if score_stats:
         report_path = os.path.join("logs", f"{target_date or date.today().strftime('%Y%m%d')}_analysis.txt")
+        os.makedirs("logs", exist_ok=True)
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write("ANALISE DE LOGS - MACRO SCORING WIN\n")
             f.write(f"Data: {target_date or date.today().strftime('%Y%m%d')}\n\n")

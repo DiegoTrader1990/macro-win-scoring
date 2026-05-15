@@ -28,7 +28,8 @@ desktop.ini
 # Streamlit
 .streamlit/secrets.toml
 
-# Logs
+# Logs (dados do usuário - não subir para o GitHub)
+logs/
 *.log
 
 # Cache
