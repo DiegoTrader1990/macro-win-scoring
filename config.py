@@ -3,7 +3,8 @@ Configuracao do Sistema de Macro Scoring para Mini Indice (WIN)
 ================================================================
 Todos os ativos, pesos, thresholds e parametros configuraveis.
 Pesos baseados nas correlacoes validadas com dados reais (60 dias).
-v4.0 - Setores, Multi-Timeframe, Niveis-Chave, Sinais Avancados
+v5.0 - Score Smoother, Price Reversal, Regime Detector, Signal Manager,
+       Performance Tracker, Alert System, Dynamic Contract Detection
 """
 
 # ============================================================
@@ -19,11 +20,23 @@ MT5_CONFIG = {
 }
 
 # ============================================================
+# DETECCAO DINAMICA DE CONTRATO WIN/WDO
+# ============================================================
+WIN_CONTRACT_CONFIG = {
+    "enabled": True,
+    "month_codes": {1: "F", 2: "G", 3: "H", 4: "J", 5: "K", 6: "M",
+                    7: "N", 8: "Q", 9: "U", 10: "V", 11: "X", 12: "Z"},
+    "base_prefix": "WIN",
+    "wdo_prefix": "WDO",
+    "roll_days_before": 3,
+}
+
+# ============================================================
 # MAPEAMENTO DE ATIVOS - MT5
 # ============================================================
 MT5_SYMBOLS = {
-    "WIN": "WINN25",
-    "WDO": "WDON25",
+    "WIN": "AUTO",
+    "WDO": "AUTO",
     "VALE3": "VALE3",
     "PETR4": "PETR4",
     "ITUB4": "ITUB4",
@@ -63,6 +76,7 @@ YF_SYMBOLS = {
     "PETR_ADR": "PBR",
     "EWZ": "EWZ",
     "IBOV": "^BVSP",
+    "DI1_FUTURES": "DI1=F",
 }
 
 DUAL_SOURCE_ASSETS = {
@@ -142,6 +156,7 @@ SECTOR_GROUPS = {
             "US10Y": {"yf": "^TNX", "display": "US10Y"},
             "US2Y": {"yf": "^IRX", "display": "US2Y"},
             "IMAB11": {"yf": "IMAB11.SA", "display": "IMA-B"},
+            "DI1_FUTURES": {"yf": "DI1=F", "display": "DI1"},
         }
     },
     "COMMODITIES": {
@@ -193,7 +208,7 @@ KEY_LEVELS_CONFIG = {
 # TRACKING DO WIN PARA DIVERGENCIA
 # ============================================================
 WIN_TRACKING = {
-    "mt5_symbol": "WINN25",
+    "mt5_symbol": "AUTO",
     "yf_symbol": "EWZ",
     "yf_direct": "^BVSP",
     "enabled": True,
@@ -201,25 +216,27 @@ WIN_TRACKING = {
 }
 
 # ============================================================
-# PESOS DO SCORING MACRO
+# PESOS DO SCORING MACRO (v5.0 - com DI1_FUTURES)
+# Total = 1.00
 # ============================================================
 MACRO_WEIGHTS = {
-    "EWZ":         {"weight": 0.12, "direction": +1, "corr": 0.96, "category": "Fluxo Estrangeiro"},
-    "VALE_ADR":    {"weight": 0.10, "direction": +1, "corr": 0.75, "category": "ADRs/Overnight"},
-    "VIX":         {"weight": 0.09, "direction": -1, "corr": -0.63, "category": "Volatilidade"},
+    "EWZ":         {"weight": 0.10, "direction": +1, "corr": 0.96, "category": "Fluxo Estrangeiro"},
+    "VALE_ADR":    {"weight": 0.09, "direction": +1, "corr": 0.75, "category": "ADRs/Overnight"},
+    "VIX":         {"weight": 0.08, "direction": -1, "corr": -0.63, "category": "Volatilidade"},
     "DXY":         {"weight": 0.08, "direction": -1, "corr": -0.57, "category": "Moedas"},
-    "ES_FUTURES":  {"weight": 0.08, "direction": +1, "corr": 0.57, "category": "Indices Globais"},
-    "EUROSTOXX50": {"weight": 0.07, "direction": +1, "corr": 0.53, "category": "Indices Globais"},
-    "IMAB11":      {"weight": 0.07, "direction": +1, "corr": 0.56, "category": "Juros/Renda Fixa"},
+    "ES_FUTURES":  {"weight": 0.07, "direction": +1, "corr": 0.57, "category": "Indices Globais"},
+    "EUROSTOXX50": {"weight": 0.06, "direction": +1, "corr": 0.53, "category": "Indices Globais"},
+    "IMAB11":      {"weight": 0.06, "direction": +1, "corr": 0.56, "category": "Juros/DI"},
     "DAX":         {"weight": 0.05, "direction": +1, "corr": 0.49, "category": "Indices Globais"},
-    "US10Y":       {"weight": 0.05, "direction": -1, "corr": -0.48, "category": "Juros/Renda Fixa"},
+    "US10Y":       {"weight": 0.05, "direction": -1, "corr": -0.48, "category": "Juros/DI"},
+    "WDO":         {"weight": 0.05, "direction": -1, "corr": -0.35, "category": "Moedas"},
+    "DI1_FUTURES": {"weight": 0.05, "direction": -1, "corr": -0.52, "category": "Juros/DI"},
     "WTI":         {"weight": 0.04, "direction": -1, "corr": -0.50, "category": "Commodities"},
     "SP500":       {"weight": 0.04, "direction": +1, "corr": 0.45, "category": "Indices Globais"},
     "COPPER":      {"weight": 0.04, "direction": +1, "corr": 0.44, "category": "Commodities"},
     "BITCOIN":     {"weight": 0.03, "direction": +1, "corr": 0.41, "category": "Risk Appetite"},
     "NIKKEI":      {"weight": 0.03, "direction": +1, "corr": 0.35, "category": "Indices Globais"},
     "IFNC":        {"weight": 0.03, "direction": +1, "corr": 0.40, "category": "Setorial BR"},
-    "WDO":         {"weight": 0.03, "direction": -1, "corr": -0.35, "category": "Moedas"},
     "BRENT":       {"weight": 0.02, "direction": -1, "corr": -0.30, "category": "Commodities"},
     "IMAT":        {"weight": 0.01, "direction": +1, "corr": 0.25, "category": "Setorial BR"},
     "IRON_ORE":    {"weight": 0.01, "direction": +1, "corr": 0.20, "category": "Commodities"},
@@ -275,10 +292,10 @@ CATEGORIES = {
         "color": "#FF9800",
         "assets": ["IRON_ORE", "BRENT", "WTI", "COPPER", "GOLD"]
     },
-    "Juros/RF": {
+    "Juros/DI": {
         "icon": "TX",
         "color": "#9C27B0",
-        "assets": ["US10Y", "IMAB11"]
+        "assets": ["US10Y", "IMAB11", "DI1_FUTURES"]
     },
     "ADRs": {
         "icon": "ADR",
@@ -295,6 +312,93 @@ CATEGORIES = {
         "color": "#8BC34A",
         "assets": ["IFNC", "IMAT", "ICON"]
     },
+}
+
+# ============================================================
+# CONFIGURACAO DO SCORE SMOOTHER (EMA/SMA)
+# ============================================================
+SCORE_SMOOTHER_CONFIG = {
+    "enabled": True,
+    "ema_period": 5,
+    "sma_period": 10,
+    "use_ema": True,
+    "max_history": 500,
+}
+
+# ============================================================
+# CONFIGURACAO DE PRICE REVERSAL (Divergencia Preco vs Score)
+# ============================================================
+PRICE_REVERSAL_CONFIG = {
+    "enabled": True,
+    "momentum_periods": [3, 5, 10],
+    "score_threshold_bearish": -25,
+    "score_threshold_bullish": 25,
+    "min_positive_periods": 2,
+    "strong_momentum_threshold": 0.5,
+    "moderate_momentum_threshold": 0.2,
+    "max_history": 500,
+}
+
+# ============================================================
+# CONFIGURACAO DE ALERTAS (Som + Webhook + Telegram)
+# ============================================================
+ALERT_CONFIG = {
+    "enabled": True,
+    "cooldown_seconds": 120,
+    "sound_enabled": True,
+    "webhook_enabled": False,
+    "webhook_url": "",
+    "telegram_enabled": False,
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "alert_on_signal_change": True,
+    "alert_on_strong_signal": True,
+    "alert_on_divergence": True,
+    "alert_on_recovery": True,
+    "alert_on_reversal": True,
+    "strong_signal_threshold": 50,
+}
+
+# ============================================================
+# CONFIGURACAO DO SIGNAL FILTER (Cooldown + Confluencia)
+# ============================================================
+SIGNAL_FILTER_CONFIG = {
+    "enabled": True,
+    "cooldown_same_type_seconds": 300,
+    "cooldown_same_direction_seconds": 120,
+    "min_confluence_filters": 3,
+    "filters": {
+        "score_zone": True,
+        "delta_direction": True,
+        "momentum_confirm": True,
+        "not_in_divergence": True,
+        "recovery_confirmed": True,
+    },
+}
+
+# ============================================================
+# CONFIGURACAO DE PERFORMANCE TRACKER
+# ============================================================
+PERFORMANCE_CONFIG = {
+    "enabled": True,
+    "max_pending_signals": 50,
+    "max_signal_lifetime_seconds": 1800,
+    "default_sl_points": 200,
+    "default_tp_points": 400,
+    "track_all_signals": True,
+}
+
+# ============================================================
+# CONFIGURACAO DO REGIME DETECTOR
+# ============================================================
+REGIME_CONFIG = {
+    "enabled": True,
+    "lookback_periods": 20,
+    "trend_threshold": 20,
+    "lateral_range": 15,
+    "volatility_threshold": 15,
+    "transition_delta_threshold": 10,
+    "min_periods": 5,
 }
 
 # ============================================================
@@ -376,12 +480,21 @@ LOG_CONFIG = {
     "asset_log_file": "asset_log.csv",
     "signal_log_file": "signal_log.csv",
     "session_log_file": "session_log.jsonl",
+    "performance_log_file": "performance_log.csv",
+    "system_log_file": "system_log.jsonl",
     "retention_days": 90,
     "log_every_n_reads": 1,
     "enable_score_log": True,
     "enable_asset_log": True,
     "enable_signal_log": True,
     "enable_session_log": True,
+    "log_score_ema": True,
+    "log_regime": True,
+    "log_price_reversal": True,
+    "log_sector_snapshot": True,
+    "log_win_price": True,
+    "enable_performance_log": True,
+    "enable_system_log": True,
 }
 
 # ============================================================
