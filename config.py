@@ -77,8 +77,8 @@ DUAL_SOURCE_ASSETS = {
 # ============================================================
 WIN_TRACKING = {
     "mt5_symbol": "WINN25",
-    "yf_symbol": "EWZ",          # Fallback: usa EWZ como proxy
-    "yf_direct": "^BVSP",        # Alternativa: Ibovespa direto
+    "yf_symbol": "EWZ",
+    "yf_direct": "^BVSP",
     "enabled": True,
     "min_periods_for_trend": 5,
 }
@@ -178,7 +178,7 @@ CATEGORIES = {
 }
 
 # ============================================================
-# CONFIGURAÇÃO DO DASHBOARD COMPACTO (600x1000)
+# CONFIGURAÇÃO DO DASHBOARD
 # ============================================================
 DASHBOARD_CONFIG = {
     "width": 600,
@@ -186,6 +186,74 @@ DASHBOARD_CONFIG = {
     "theme": "dark",
     "compact_mode": True,
     "sidebar_collapsed": True,
+}
+
+# ============================================================
+# CONFIGURAÇÃO DE INTERFACE (UI) - AJUSTÁVEL
+# ============================================================
+UI_CONFIG = {
+    # ---- PAINEL ----
+    "panel_width": 580,                    # Largura máxima do painel (px)
+    "panel_padding": 8,                    # Padding lateral (px)
+
+    # ---- FONTES ----
+    "font_family_data": "'Consolas', 'JetBrains Mono', 'Courier New', monospace",
+    "font_family_ui": "'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif",
+
+    # Score principal
+    "score_font_size": 48,                 # Tamanho do número do score (px)
+    "score_label_font_size": 11,           # Label do sinal (px)
+    "score_glow": True,                    # Efeito glow no score
+
+    # Metric strip
+    "metric_value_font_size": 15,          # Valor das métricas (px)
+    "metric_label_font_size": 8,           # Label das métricas (px)
+
+    # Signal banner
+    "signal_font_size": 13,                # Texto do sinal (px)
+    "signal_action_font_size": 9,          # Texto da ação (px)
+
+    # Categorias
+    "category_font_size": 11,              # Nome da categoria (px)
+    "category_score_font_size": 12,        # Score da categoria (px)
+    "category_bar_height": 5,              # Altura da barra (px)
+    "category_bar_width": 140,             # Largura da barra (px)
+
+    # Tabela de ativos
+    "asset_table_header_size": 8,          # Header da tabela (px)
+    "asset_table_row_size": 10,            # Linha da tabela (px)
+    "asset_name_width": 90,               # Largura coluna nome (px)
+    "asset_price_width": 75,              # Largura coluna preço (px)
+    "asset_change_width": 65,             # Largura coluna variação (px)
+    "asset_contrib_width": 60,            # Largura coluna contribuição (px)
+    "asset_dir_width": 30,               # Largura coluna direção (px)
+    "asset_row_height": 22,              # Altura da linha (px)
+
+    # Divergência
+    "divergence_font_size": 10,
+    "divergence_desc_size": 8,
+
+    # Header
+    "header_title_size": 11,
+    "header_status_size": 9,
+
+    # Gráfico histórico
+    "chart_height": 130,
+
+    # ---- CORES ----
+    "bg_primary": "#080c12",              # Fundo principal
+    "bg_secondary": "#0d1420",            # Fundo cards
+    "bg_tertiary": "#111a28",             # Fundo hover/alt
+    "border_color": "#1a2535",            # Bordas
+    "border_light": "#243040",            # Bordas mais claras
+    "text_primary": "#d0d8e0",            # Texto principal
+    "text_secondary": "#6b7d8e",          # Texto secundário
+    "text_muted": "#3a4a5a",              # Texto mudo
+    "accent": "#4fc3f7",                  # Cor de destaque
+    "positive": "#00E676",                # Positivo
+    "negative": "#FF1744",                # Negativo
+    "warning": "#FFD600",                 # Alerta
+    "neutral": "#78909C",                 # Neutro
 }
 
 # ============================================================
