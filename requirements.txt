@@ -1,0 +1,17 @@
+# Sistema de Macro Scoring - Mini Índice (WIN)
+# Dependências
+
+# Fontes de dados
+yfinance>=0.2.31
+
+# Dashboard
+streamlit>=1.30.0
+plotly>=5.18.0
+pandas>=2.0.0
+
+# MT5 (opcional - só funciona no Windows com MT5 instalado)
+# Descomente a linha abaixo se estiver no Windows:
+# MetaTrader5>=5.0.45
+
+# Utilitários
+requests>=2.31.0
