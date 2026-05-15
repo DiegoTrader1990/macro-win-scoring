@@ -1,12 +1,13 @@
 """
-Configuração do Sistema de Macro Scoring para Mini Índice (WIN)
+Configuracao do Sistema de Macro Scoring para Mini Indice (WIN)
 ================================================================
-Todos os ativos, pesos, thresholds e parâmetros configuráveis.
-Pesos baseados nas correlações validadas com dados reais (60 dias).
+Todos os ativos, pesos, thresholds e parametros configuraveis.
+Pesos baseados nas correlacoes validadas com dados reais (60 dias).
+v4.0 - Setores, Multi-Timeframe, Niveis-Chave, Sinais Avancados
 """
 
 # ============================================================
-# CONFIGURAÇÃO DO MT5 (CORRETORA RICO)
+# CONFIGURACAO DO MT5 (CORRETORA RICO)
 # ============================================================
 MT5_CONFIG = {
     "path": r"C:\Program Files\MetaTrader 5\terminal64.exe",
@@ -27,6 +28,7 @@ MT5_SYMBOLS = {
     "PETR4": "PETR4",
     "ITUB4": "ITUB4",
     "BBDC4": "BBDC4",
+    "BBAS3": "BBAS3",
     "PETR3": "PETR3",
     "IFNC": "IFNC",
     "IMAT": "IMAT",
@@ -60,11 +62,15 @@ YF_SYMBOLS = {
     "VALE_ADR": "VALE",
     "PETR_ADR": "PBR",
     "EWZ": "EWZ",
+    "IBOV": "^BVSP",
 }
 
 DUAL_SOURCE_ASSETS = {
     "VALE3":  {"mt5": "VALE3", "yf": "VALE3.SA"},
     "PETR4":  {"mt5": "PETR4", "yf": "PETR4.SA"},
+    "ITUB4":  {"mt5": "ITUB4", "yf": "ITUB4.SA"},
+    "BBDC4":  {"mt5": "BBDC4", "yf": "BBDC4.SA"},
+    "BBAS3":  {"mt5": "BBAS3", "yf": "BBAS3.SA"},
     "IFNC":   {"mt5": "IFNC",  "yf": "IFNC.SA"},
     "IMAT":   {"mt5": "IMAT",  "yf": "IMAT.SA"},
     "ICON":   {"mt5": "ICON",  "yf": "ICON.SA"},
@@ -73,7 +79,118 @@ DUAL_SOURCE_ASSETS = {
 }
 
 # ============================================================
-# TRACKING DO WIN PARA DIVERGÊNCIA
+# GRUPOS DE SETORES - PAINEL PRINCIPAL
+# Cada setor com ativos e tickers YF para buscar variacao
+# ============================================================
+SECTOR_GROUPS = {
+    "BANCOS": {
+        "icon": "BNK",
+        "color": "#2196F3",
+        "description": "Setor financeiro B3",
+        "assets": {
+            "ITUB4": {"yf": "ITUB4.SA", "display": "Itau"},
+            "BBDC4": {"yf": "BBDC4.SA", "display": "Bradesco"},
+            "BBAS3": {"yf": "BBAS3.SA", "display": "B Brasil"},
+        }
+    },
+    "MINERACAO": {
+        "icon": "MIN",
+        "color": "#FF9800",
+        "description": "Mineradoras e siderurgicas",
+        "assets": {
+            "VALE3": {"yf": "VALE3.SA", "display": "Vale"},
+            "CSNA3": {"yf": "CSNA3.SA", "display": "CSN"},
+            "GGBR4": {"yf": "GGBR4.SA", "display": "Gerdau"},
+        }
+    },
+    "ENERGIA": {
+        "icon": "ENR",
+        "color": "#4CAF50",
+        "description": "Petroleo e energia",
+        "assets": {
+            "PETR4": {"yf": "PETR4.SA", "display": "Petrobras"},
+            "PRIO3": {"yf": "PRIO3.SA", "display": "Prio"},
+            "EGIE3": {"yf": "EGIE3.SA", "display": "Engie"},
+        }
+    },
+    "EXTERIOR": {
+        "icon": "EXT",
+        "color": "#9C27B0",
+        "description": "Indices globais e fluxo",
+        "assets": {
+            "SP500": {"yf": "^GSPC", "display": "S&P500"},
+            "DAX": {"yf": "^GDAXI", "display": "DAX"},
+            "EWZ": {"yf": "EWZ", "display": "EWZ"},
+            "ES_FUTURES": {"yf": "ES=F", "display": "ES Fut"},
+        }
+    },
+    "MOEDAS": {
+        "icon": "FX",
+        "color": "#00BCD4",
+        "description": "Dolar e moedas",
+        "assets": {
+            "DXY": {"yf": "DX-Y.NYB", "display": "DXY"},
+            "USDBRL": {"yf": "BRL=X", "display": "USD/BRL"},
+            "WDO": {"yf": "BRL=X", "display": "WDO"},
+        }
+    },
+    "JUROS": {
+        "icon": "TX",
+        "color": "#E040FB",
+        "description": "Taxas e renda fixa",
+        "assets": {
+            "US10Y": {"yf": "^TNX", "display": "US10Y"},
+            "US2Y": {"yf": "^IRX", "display": "US2Y"},
+            "IMAB11": {"yf": "IMAB11.SA", "display": "IMA-B"},
+        }
+    },
+    "COMMODITIES": {
+        "icon": "COM",
+        "color": "#FF5722",
+        "description": "Materias-primas",
+        "assets": {
+            "IRON_ORE": {"yf": "SI=F", "display": "Ferro"},
+            "BRENT": {"yf": "BZ=F", "display": "Brent"},
+            "COPPER": {"yf": "HG=F", "display": "Cobre"},
+        }
+    },
+    "VOLATILIDADE": {
+        "icon": "VIX",
+        "color": "#FFD600",
+        "description": "Medo e volatilidade",
+        "assets": {
+            "VIX": {"yf": "^VIX", "display": "VIX"},
+        }
+    },
+}
+
+# ============================================================
+# CONFIGURACAO MULTI-TIMEFRAME
+# ============================================================
+MULTI_TIMEFRAME_CONFIG = {
+    "intervals": {
+        "5m": {"yf_interval": "5m", "yf_period": "1d", "label": "5m"},
+        "15m": {"yf_interval": "15m", "yf_period": "5d", "label": "15m"},
+        "dia": {"yf_interval": "1d", "yf_period": "5d", "label": "Dia"},
+    },
+    "cache_duration": 30,
+}
+
+# ============================================================
+# CONFIGURACAO DE NIVEIS-CHAVE (S/R) DO WIN
+# ============================================================
+KEY_LEVELS_CONFIG = {
+    "enabled": True,
+    "methods": ["pivot_classic", "recent_highs_lows", "score_zones"],
+    "pivot_style": "classic",
+    "lookback_days": 5,
+    "min_touches_for_level": 2,
+    "level_proximity_pct": 0.3,
+    "win_multiplier": 5,
+}
+
+# ============================================================
+# TRACKING DO WIN PARA DIVERGENCIA
 # ============================================================
 WIN_TRACKING = {
     "mt5_symbol": "WINN25",
@@ -110,7 +227,7 @@ MACRO_WEIGHTS = {
 }
 
 # ============================================================
-# THRESHOLDS E PARÂMETROS DE SINAL
+# THRESHOLDS E PARAMETROS DE SINAL
 # ============================================================
 SIGNAL_CONFIG = {
     "strong_bullish": 60,
@@ -129,10 +246,13 @@ SIGNAL_CONFIG = {
     "trading_start": "09:00",
     "trading_end": "17:30",
     "pre_market_start": "09:00",
+    "divergence_signal_threshold": 25,
+    "strong_move_delta": 15,
+    "reversal_confirmation_periods": 3,
 }
 
 # ============================================================
-# CATEGORIAS PARA O DASHBOARD
+# CATEGORIAS PARA O DASHBOARD (scoring)
 # ============================================================
 CATEGORIES = {
     "Indices Globais": {
@@ -178,7 +298,7 @@ CATEGORIES = {
 }
 
 # ============================================================
-# CONFIGURAÇÃO DO DASHBOARD
+# CONFIGURACAO DO DASHBOARD
 # ============================================================
 DASHBOARD_CONFIG = {
     "width": 600,
@@ -189,75 +309,55 @@ DASHBOARD_CONFIG = {
 }
 
 # ============================================================
-# CONFIGURAÇÃO DE INTERFACE (UI) - AJUSTÁVEL
+# CONFIGURACAO DE INTERFACE (UI) - AJUSTAVEL
 # ============================================================
 UI_CONFIG = {
-    # ---- PAINEL ----
-    "panel_width": 580,                    # Largura máxima do painel (px)
-    "panel_padding": 8,                    # Padding lateral (px)
-
-    # ---- FONTES ----
+    "panel_width": 580,
+    "panel_padding": 6,
     "font_family_data": "'Consolas', 'JetBrains Mono', 'Courier New', monospace",
     "font_family_ui": "'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif",
-
-    # Score principal
-    "score_font_size": 48,                 # Tamanho do número do score (px)
-    "score_label_font_size": 11,           # Label do sinal (px)
-    "score_glow": True,                    # Efeito glow no score
-
-    # Metric strip
-    "metric_value_font_size": 15,          # Valor das métricas (px)
-    "metric_label_font_size": 8,           # Label das métricas (px)
-
-    # Signal banner
-    "signal_font_size": 13,                # Texto do sinal (px)
-    "signal_action_font_size": 9,          # Texto da ação (px)
-
-    # Categorias
-    "category_font_size": 11,              # Nome da categoria (px)
-    "category_score_font_size": 12,        # Score da categoria (px)
-    "category_bar_height": 5,              # Altura da barra (px)
-    "category_bar_width": 140,             # Largura da barra (px)
-
-    # Tabela de ativos
-    "asset_table_header_size": 8,          # Header da tabela (px)
-    "asset_table_row_size": 10,            # Linha da tabela (px)
-    "asset_name_width": 90,               # Largura coluna nome (px)
-    "asset_price_width": 75,              # Largura coluna preço (px)
-    "asset_change_width": 65,             # Largura coluna variação (px)
-    "asset_contrib_width": 60,            # Largura coluna contribuição (px)
-    "asset_dir_width": 30,               # Largura coluna direção (px)
-    "asset_row_height": 22,              # Altura da linha (px)
-
-    # Divergência
-    "divergence_font_size": 10,
-    "divergence_desc_size": 8,
-
-    # Header
-    "header_title_size": 11,
-    "header_status_size": 9,
-
-    # Gráfico histórico
-    "chart_height": 130,
-
-    # ---- CORES ----
-    "bg_primary": "#080c12",              # Fundo principal
-    "bg_secondary": "#0d1420",            # Fundo cards
-    "bg_tertiary": "#111a28",             # Fundo hover/alt
-    "border_color": "#1a2535",            # Bordas
-    "border_light": "#243040",            # Bordas mais claras
-    "text_primary": "#d0d8e0",            # Texto principal
-    "text_secondary": "#6b7d8e",          # Texto secundário
-    "text_muted": "#3a4a5a",              # Texto mudo
-    "accent": "#4fc3f7",                  # Cor de destaque
-    "positive": "#00E676",                # Positivo
-    "negative": "#FF1744",                # Negativo
-    "warning": "#FFD600",                 # Alerta
-    "neutral": "#78909C",                 # Neutro
+    "score_font_size": 36,
+    "score_label_font_size": 10,
+    "score_glow": True,
+    "metric_value_font_size": 13,
+    "metric_label_font_size": 7,
+    "signal_font_size": 12,
+    "signal_action_font_size": 8,
+    "sector_title_font_size": 8,
+    "sector_asset_font_size": 8,
+    "sector_var_font_size": 9,
+    "sector_score_font_size": 11,
+    "sector_block_padding": 4,
+    "level_font_size": 9,
+    "level_price_font_size": 10,
+    "level_row_height": 16,
+    "divergence_font_size": 9,
+    "divergence_desc_size": 7,
+    "header_title_size": 10,
+    "header_status_size": 8,
+    "chart_height": 90,
+    "bg_primary": "#080c12",
+    "bg_secondary": "#0d1420",
+    "bg_tertiary": "#111a28",
+    "bg_sector": "#0a1018",
+    "border_color": "#1a2535",
+    "border_light": "#243040",
+    "text_primary": "#d0d8e0",
+    "text_secondary": "#6b7d8e",
+    "text_muted": "#3a4a5a",
+    "accent": "#4fc3f7",
+    "positive": "#00E676",
+    "negative": "#FF1744",
+    "warning": "#FFD600",
+    "neutral": "#78909C",
+    "level_resistance": "#FF5252",
+    "level_support": "#69F0AE",
+    "level_pivot": "#FFD740",
+    "level_current": "#FFFFFF",
 }
 
 # ============================================================
-# CONFIGURAÇÃO DE DIVERGÊNCIA
+# CONFIGURACAO DE DIVERGENCIA
 # ============================================================
 DIVERGENCE_CONFIG = {
     "enabled": True,
@@ -268,7 +368,7 @@ DIVERGENCE_CONFIG = {
 }
 
 # ============================================================
-# CONFIGURAÇÃO DE LOGS
+# CONFIGURACAO DE LOGS
 # ============================================================
 LOG_CONFIG = {
     "log_dir": "logs",
@@ -285,7 +385,7 @@ LOG_CONFIG = {
 }
 
 # ============================================================
-# PARÂMETROS DE BACKTEST / VALIDAÇÃO
+# PARAMETROS DE BACKTEST / VALIDACAO
 # ============================================================
 BACKTEST_CONFIG = {
     "benchmark": "BOVA11",
