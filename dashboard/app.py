@@ -1,5 +1,5 @@
 """
-Dashboard Profissional - Macro Scoring WIN v6.1
+Dashboard Profissional - Macro Scoring WIN v6.2
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
@@ -7,6 +7,8 @@ SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
 v6.2: Fixed method name mismatches, DI1=F proxy, auto-refresh fix.
+v6.3: Windows compatibility - safe formatting, global error handling,
+      no meta-refresh, None-safe dict access.
 
 Para rodar: streamlit run dashboard/app.py
 """
@@ -196,6 +198,30 @@ UI = UI_CONFIG
 st.set_page_config(page_title="Macro WIN v6", page_icon="W", layout="centered",
                    initial_sidebar_state="collapsed")
 
+# ============ SAFE FORMAT HELPER (v6.3) ============
+def sf(val, fmt="+.1f", default="---"):
+    """Safe format - handles None gracefully without TypeError.
+    
+    Usage: sf(val, "+.2f") instead of f"{val:+.2f}"
+    Returns default string when val is None or formatting fails.
+    """
+    if val is None:
+        return default
+    try:
+        return f"{val:{fmt}}"
+    except (TypeError, ValueError):
+        return default
+
+def sfd(d, key, fmt="+.1f", default="---"):
+    """Safe format from dict - gets key from dict and safely formats.
+    
+    Usage: sfd(dxy, 'change_pct', '+.2f') instead of dxy.get('change_pct',0):+.2f
+    """
+    if not isinstance(d, dict):
+        return default
+    return sf(d.get(key), fmt, default)
+
+
 # ============ CSS ULTRA-COMPACT v6.1 ============
 st.markdown(f"""
 <style>
@@ -319,6 +345,11 @@ st.markdown(f"""
     .stTabs [data-baseweb="tab"]{{height:1.2rem;font-size:7px;font-weight:700;letter-spacing:1px;color:{UI['text_muted']};padding:0 .4rem;font-family:{UI['font_family_data']}}}
     .stTabs [aria-selected="true"]{{color:{UI['accent']}!important;border-bottom:2px solid {UI['accent']}!important;background:{UI['bg_primary']}}}
     .stTabs [data-baseweb="tab-panel"]{{padding:0}}
+
+    /* ERROR DISPLAY v6.3 */
+    .err-display{{background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-family:{UI['font_family_data']};font-size:9px;color:#FF8A80}}
+    .err-display .err-title{{font-weight:800;font-size:10px;color:#FF5252;margin-bottom:4px}}
+    .err-display .err-trace{{font-size:7px;color:#FF8A80;white-space:pre-wrap;word-break:break-all}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -332,11 +363,29 @@ if _import_errors:
 
 
 # ============ HELPER: Resolve AUTO contract ============
+@st.cache_data(ttl=3600)
+def _cached_resolve_win_contract(roll_days):
+    """Cached contract resolution - only re-resolves every hour."""
+    try:
+        return get_active_win_contract(roll_days_before=roll_days)
+    except Exception as e:
+        logger.warning(f"Error resolving WIN contract: {e}")
+        return None
+
+@st.cache_data(ttl=3600)
+def _cached_resolve_wdo_contract(roll_days):
+    """Cached contract resolution - only re-resolves every hour."""
+    try:
+        return get_active_wdo_contract(roll_days_before=roll_days)
+    except Exception as e:
+        logger.warning(f"Error resolving WDO contract: {e}")
+        return None
+
 def resolve_win_contract():
     try:
         if WIN_TRACKING.get("mt5_symbol") == "AUTO" and WIN_CONTRACT_CONFIG.get("enabled", True):
             roll = WIN_CONTRACT_CONFIG.get("roll_days_before", 3)
-            return get_active_win_contract(roll_days_before=roll)
+            return _cached_resolve_win_contract(roll)
     except Exception as e:
         logger.warning(f"Error resolving WIN contract: {e}")
     return None
@@ -345,7 +394,7 @@ def resolve_wdo_contract():
     try:
         if MT5_SYMBOLS.get("WDO") == "AUTO" and WIN_CONTRACT_CONFIG.get("enabled", True):
             roll = WIN_CONTRACT_CONFIG.get("roll_days_before", 3)
-            return get_active_wdo_contract(roll_days_before=roll)
+            return _cached_resolve_wdo_contract(roll)
     except Exception as e:
         logger.warning(f"Error resolving WDO contract: {e}")
     return None
@@ -500,7 +549,7 @@ def refresh_data():
             delta_analyzer.update(score)
             delta_result = delta_analyzer.get_entry_signal(score_result)
             st.session_state.delta_result = delta_result
-            delta_val = delta_result.get("delta", 0)
+            delta_val = delta_result.get("delta", 0) or 0
         except Exception as e:
             logger.warning(f"Delta error: {e}")
             st.session_state.delta_result = {"delta": 0, "momentum": 0, "entry_signal": {"type": "NEUTRO", "label": "ERRO", "confidence": "---", "action": ""}, "confluence": {}}
@@ -746,451 +795,491 @@ def refresh_data():
 
 def vc(val):
     if val is None: return "neu"
-    return "pos" if val > 0 else "neg" if val < 0 else "neu"
+    try:
+        return "pos" if val > 0 else "neg" if val < 0 else "neu"
+    except (TypeError, ValueError):
+        return "neu"
 
 def vs(val):
     if val is None: return "---"
-    return f"{val:+.2f}%"
+    try:
+        return f"{val:+.2f}%"
+    except (TypeError, ValueError):
+        return "---"
 
 
 # ============ LAYOUT ============
 tab_mesa, tab_analysis = st.tabs(["MESA", "ANALISE"])
 
 with tab_mesa:
-    if CRITICAL_FAILURES:
-        st.error(f"Modulos criticos faltando: {', '.join(CRITICAL_FAILURES)}")
-        st.info("Verifique se todos os arquivos estao presentes e as dependencias instaladas.")
-        with st.expander("Detalhes dos erros"):
-            for e in _import_errors:
-                st.code(e)
-        if not st.button("Tentar mesmo assim (modo limitado)"):
+    # ====== GLOBAL ERROR HANDLING (v6.3) ======
+    try:
+
+        if CRITICAL_FAILURES:
+            st.error(f"Modulos criticos faltando: {', '.join(CRITICAL_FAILURES)}")
+            st.info("Verifique se todos os arquivos estao presentes e as dependencias instaladas.")
+            with st.expander("Detalhes dos erros"):
+                for e in _import_errors:
+                    st.code(e)
+            if not st.button("Tentar mesmo assim (modo limitado)"):
+                st.stop()
+
+        if not st.session_state.get("score_result"):
+            with st.spinner("Conectando..."):
+                refresh_data()
+
+        sr = st.session_state.get("score_result", {})
+        if not sr:
+            st.error("Sem dados. Verifique conexao com internet.")
             st.stop()
 
-    if not st.session_state.get("score_result"):
-        with st.spinner("Conectando..."):
-            refresh_data()
+        score = sr.get("score", 0) or 0
+        signal = sr.get("signal", {})
+        score_color = get_score_color(score)
+        dr = st.session_state.get("delta_result", {})
+        delta_val = dr.get("delta", 0) if dr else 0
+        delta_val = delta_val if delta_val is not None else 0
+        mom_val = dr.get("momentum", 0) if dr else 0
+        mom_val = mom_val if mom_val is not None else 0
+        entry = dr.get("entry_signal", {}) if dr else {}
+        conf = dr.get("confluence", {}) if dr else {}
+        div = st.session_state.get("divergence_result", {})
+        ad = st.session_state.get("last_data", {})
+        sd = st.session_state.get("sectors_data", {})
+        lr = st.session_state.get("levels_result", {})
+        recovery = dr.get("intraday_recovery") if dr else None
+        rev_down = dr.get("intraday_reversal_down") if dr else None
 
-    sr = st.session_state.get("score_result", {})
-    if not sr:
-        st.error("Sem dados. Verifique conexao com internet.")
-        st.stop()
+        smoothed = st.session_state.get("smoothed_result", {})
+        reversal_result = st.session_state.get("reversal_result", {})
+        regime_result = st.session_state.get("regime_result", {})
+        filtered_signal = st.session_state.get("filtered_signal", {})
+        perf_stats = st.session_state.get("perf_stats", {})
 
-    score = sr.get("score", 0)
-    signal = sr.get("signal", {})
-    score_color = get_score_color(score)
-    dr = st.session_state.get("delta_result", {})
-    delta_val = dr.get("delta", 0) if dr else 0
-    mom_val = dr.get("momentum", 0) if dr else 0
-    entry = dr.get("entry_signal", {}) if dr else {}
-    conf = dr.get("confluence", {}) if dr else {}
-    div = st.session_state.get("divergence_result", {})
-    ad = st.session_state.get("last_data", {})
-    sd = st.session_state.get("sectors_data", {})
-    lr = st.session_state.get("levels_result", {})
-    recovery = dr.get("intraday_recovery") if dr else None
-    rev_down = dr.get("intraday_reversal_down") if dr else None
+        context_result = st.session_state.get("context_result", {})
+        structural_result = st.session_state.get("structural_result", {})
+        compression_result = st.session_state.get("compression_result", {})
+        confidence_result = st.session_state.get("confidence_result", {})
+        calendar_result = st.session_state.get("calendar_result", {})
 
-    smoothed = st.session_state.get("smoothed_result", {})
-    reversal_result = st.session_state.get("reversal_result", {})
-    regime_result = st.session_state.get("regime_result", {})
-    filtered_signal = st.session_state.get("filtered_signal", {})
-    perf_stats = st.session_state.get("perf_stats", {})
-
-    context_result = st.session_state.get("context_result", {})
-    structural_result = st.session_state.get("structural_result", {})
-    compression_result = st.session_state.get("compression_result", {})
-    confidence_result = st.session_state.get("confidence_result", {})
-    calendar_result = st.session_state.get("calendar_result", {})
-
-    # ==== 0. ALERT BAR ====
-    alert_result = st.session_state.get("alert_result", {})
-    if alert_result and alert_result.get("alert_fired"):
-        at = alert_result.get("alert_type", "")
-        color_map_alert = {"PRICE_REVERSAL": UI['warning'], "RECOVERY": UI['positive'],
-                           "SIGNAL_CHANGE": UI['accent'], "STRONG_SIGNAL": UI['negative'],
-                           "DIVERGENCE": UI['warning']}
-        acol = color_map_alert.get(at, UI['neutral'])
-        amsg = alert_result.get("message", "").split("\n")[0][:80]
-        st.markdown(f"""
-        <div class="alert-bar" style="background:{acol}15;border-color:{acol}40">
-            <span class="alert-type" style="color:{acol}">{at.replace('_',' ')}</span>
-            <span class="alert-msg">{amsg}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ==== 1. STATUS BAR ====
-    wc = st.session_state.get("win_change")
-    wp = st.session_state.win_price
-    ws = f"{wp:,.0f}" if wp else "---"
-    wcc = f"{wc:+.2f}%" if wc is not None else "---"
-    dxy = ad.get("DXY", {})
-    vix = ad.get("VIX", {})
-    ewz = ad.get("EWZ", {})
-    lr_time = st.session_state.get("last_refresh", datetime.now())
-    mt5on = st.session_state.get("mt5_status", {}).get("success", False) if st.session_state.get("mt5_status") else False
-    srctag = '<span class="src-m">M</span>' if mt5on else '<span class="src-y">Y</span>'
-    win_contract = st.session_state.get("active_win_contract", "---")
-
-    cal_icon = ""
-    if calendar_result and calendar_result.get("has_events"):
-        cal_icon = f'<span class="sv" style="color:#FF9800">EV</span>'
-
-    time_str = lr_time.strftime("%H:%M:%S") if hasattr(lr_time, 'strftime') else '---'
-
-    st.markdown(f"""
-    <div class="sbar">
-        <div class="sc" style="background:#1a2535"><span class="sl">LIVE</span></div>
-        <div class="sc"><span class="sv" style="color:{UI['warning']}">{time_str}</span></div>
-        <div class="sc"><span class="sl">WIN</span><span class="sv">{ws}</span><span class="sv {vc(wc)}">{wcc}</span></div>
-        <div class="sc"><span class="sl">DXY</span><span class="sv {vc(dxy.get('change_pct'))}">{dxy.get('change_pct',0):+.2f}%</span></div>
-        <div class="sc"><span class="sl">VIX</span><span class="sv" style="color:{UI['warning']}">{vix.get('current_price',0):.1f}</span></div>
-        <div class="sc"><span class="sl">EWZ</span><span class="sv {vc(ewz.get('change_pct'))}">{ewz.get('change_pct',0):+.2f}%</span></div>
-        <div class="sc">{srctag}<span class="sv" style="color:{UI['text_muted']}">{sr.get('assets_available',0)}/{sr.get('assets_total',0)}</span></div>
-        <div class="sc"><span class="sl">CT</span><span class="sv" style="color:{UI['text_secondary']}">{win_contract}</span></div>
-        <div class="sc">{cal_icon}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ==== 2. SCORE ROW ====
-    dtxt = "COMPRA" if score > 0 else "VENDA" if score < 0 else "NEUTRO"
-    dbg = f"{UI['positive']}22" if score > 0 else f"{UI['negative']}22" if score < 0 else f"{UI['neutral']}22"
-    dcol = UI['positive'] if score > 0 else UI['negative'] if score < 0 else UI['neutral']
-    trend = "MELHORANDO" if delta_val > 5 else "PIORANDO" if delta_val < -5 else "ESTAVEL"
-    if conf and conf.get("score_delta_aligned"): trend += " | CONF"
-    ipct = max(0, min(100, (score + 100) / 200 * 100))
-    glow = "sglow" if UI.get("score_glow", True) else ""
-
-    ema_val = smoothed.get("ema_value") if smoothed else None
-    ema_delta = smoothed.get("ema_delta") if smoothed else None
-    ema_color = get_score_color(ema_val) if ema_val is not None else score_color
-    ema_str = f"{ema_val:+.1f}" if ema_val is not None else "---"
-    ema_delta_str = f"({ema_delta:+.1f})" if ema_delta is not None else ""
-
-    conf_score = confidence_result.get("confidence_score", 0) if confidence_result else 0
-    conf_color = confidence_result.get("color", UI['neutral']) if confidence_result else UI['neutral']
-
-    st.markdown(f"""
-    <div class="srow">
-        <div class="sdir" style="color:{dcol};background:{dbg}">{dtxt}</div>
-        <div class="smid">
-            <div class="snum {glow}" style="color:{score_color}">{score:+.1f}</div>
-            <div style="display:flex;align-items:baseline;justify-content:center;gap:3px">
-                <span class="slbl">EMA</span>
-                <span class="sema" style="color:{ema_color}">{ema_str}</span>
-                <span class="slbl">{ema_delta_str}</span>
+        # ==== 0. ALERT BAR ====
+        alert_result = st.session_state.get("alert_result", {})
+        if alert_result and alert_result.get("alert_fired"):
+            at = alert_result.get("alert_type", "")
+            color_map_alert = {"PRICE_REVERSAL": UI['warning'], "RECOVERY": UI['positive'],
+                               "SIGNAL_CHANGE": UI['accent'], "STRONG_SIGNAL": UI['negative'],
+                               "DIVERGENCE": UI['warning']}
+            acol = color_map_alert.get(at, UI['neutral'])
+            amsg = alert_result.get("message", "").split("\n")[0][:80]
+            st.markdown(f"""
+            <div class="alert-bar" style="background:{acol}15;border-color:{acol}40">
+                <span class="alert-type" style="color:{acol}">{at.replace('_',' ')}</span>
+                <span class="alert-msg">{amsg}</span>
             </div>
-            <div class="strend">{trend}</div>
-            <div class="zbar"><div class="zind" style="left:{ipct}%"></div></div>
-        </div>
-        <div class="srt">
-            <div class="sconf">conf:{signal.get('confidence','---')}</div>
-            <div class="sconf" style="color:{conf_color}">trust:{conf_score:.0f}</div>
-            <div class="sconf">n:{st.session_state.refresh_count}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # ==== 3. METRICS ====
-    sh = st.session_state.score_history
-    ac = 0
-    if len(sh) >= 3:
-        d1 = sh[-1]["score"] - sh[-2]["score"]
-        d2 = sh[-2]["score"] - sh[-3]["score"]
-        ac = d1 - d2
-    zl = "FORTE" if abs(score) > 60 else "MOD" if abs(score) > 30 else "NEU"
-    comp_score = compression_result.get("compression_score", 0) if compression_result else 0
+        # ==== 1. STATUS BAR ====
+        wc = st.session_state.get("win_change")
+        wp = st.session_state.win_price
+        ws = sf(wp, ",.0f", "---")
+        wcc = sf(wc, "+.2f", "---") + "%" if wc is not None else "---"
+        dxy = ad.get("DXY", {})
+        vix = ad.get("VIX", {})
+        ewz = ad.get("EWZ", {})
+        lr_time = st.session_state.get("last_refresh", datetime.now())
+        mt5on = st.session_state.get("mt5_status", {}).get("success", False) if st.session_state.get("mt5_status") else False
+        srctag = '<span class="src-m">M</span>' if mt5on else '<span class="src-y">Y</span>'
+        win_contract = st.session_state.get("active_win_contract", "---")
 
-    st.markdown(f"""
-    <div class="mstrip">
-        <div class="mc"><div class="mv {vc(delta_val)}">{delta_val:+.1f}</div><div class="ml">Delta</div></div>
-        <div class="mc"><div class="mv {vc(mom_val)}">{mom_val:+.1f}</div><div class="ml">Mom</div></div>
-        <div class="mc"><div class="mv {vc(ac) if abs(ac)>2 else 'neu'}">{ac:+.1f}</div><div class="ml">Acel</div></div>
-        <div class="mc"><div class="mv" style="color:{score_color}">{zl}</div><div class="ml">Zona</div></div>
-        <div class="mc"><div class="mv" style="color:{conf_color}">{conf_score:.0f}</div><div class="ml">Trust</div></div>
-        <div class="mc"><div class="mv" style="color:{compression_result.get('color', UI['neutral']) if compression_result else UI['neutral']}">{comp_score:.0f}</div><div class="ml">Comp</div></div>
-    </div>
-    """, unsafe_allow_html=True)
+        cal_icon = ""
+        if calendar_result and calendar_result.get("has_events"):
+            cal_icon = f'<span class="sv" style="color:#FF9800">EV</span>'
 
-    # ==== 4. SIGNAL BANNER ====
-    et = entry.get("type", "NEUTRO") if entry else "NEUTRO"
-    el = entry.get("label", "SEM SINAL") if entry else "SEM SINAL"
-    ec = entry.get("confidence", "") if entry else ""
-    ea = entry.get("action", "") if entry else ""
+        time_str = lr_time.strftime("%H:%M:%S") if hasattr(lr_time, 'strftime') else '---'
 
-    if "COMPRA_FORTE" in et: sbg,sb,sc2 = "#0a2e0a",UI['positive'],UI['positive']
-    elif "COMPRA" in et and "RECUPERACAO" not in et: sbg,sb,sc2 = "#0a1f0a","#66BB6A","#66BB6A"
-    elif "RECUPERACAO_FORTE" in et: sbg,sb,sc2 = "#0a2e1a",UI['positive'],UI['positive']
-    elif "RECUPERACAO" in et: sbg,sb,sc2 = "#1a2e0a","#66BB6A","#66BB6A"
-    elif "VENDA_FORTE" in et: sbg,sb,sc2 = "#2e0a0a",UI['negative'],UI['negative']
-    elif "VENDA" in et and "REVERSAO" not in et: sbg,sb,sc2 = "#1f0a0a","#EF5350","#EF5350"
-    elif "REVERSAO_BAIXA_INTRADAY" in et: sbg,sb,sc2 = "#2e1a0a",UI['negative'],UI['negative']
-    elif "REVERSAO" in et: sbg,sb,sc2 = "#2e2a0a",UI['warning'],UI['warning']
-    else: sbg,sb,sc2 = UI['bg_secondary'],UI['border_color'],UI['neutral']
-
-    fs_action = filtered_signal.get("final_action", "") if filtered_signal else ""
-    fs_was_cooldown = filtered_signal.get("was_cooldown", False) if filtered_signal else False
-    fs_downgraded = filtered_signal.get("downgraded", False) if filtered_signal else False
-    filter_note = ""
-    if fs_was_cooldown:
-        filter_note = ' <span style="font-size:6px;color:#FF9800">COOLDOWN</span>'
-    elif fs_downgraded:
-        filter_note = f' <span style="font-size:6px;color:#FF9800">&rarr; {fs_action}</span>'
-
-    st.markdown(f"""
-    <div class="sigb" style="background:{sbg};border-color:{sb}30">
-        <div class="sigt" style="color:{sc2}">{el} <span style="font-size:6px;color:{sb}88">{ec}</span>{filter_note}</div>
-        <div class="siga">{ea}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ==== 4b. CONTEXT BANNER ====
-    if context_result:
-        ctx_label = context_result.get("label", "")
-        ctx_color = context_result.get("color", UI['neutral'])
-        ctx_risk = context_result.get("risk", "")
-        ctx_reason = context_result.get("reason", "")[:80]
         st.markdown(f"""
-        <div class="ctxb" style="border-left-color:{ctx_color};background:{ctx_color}08">
-            <span class="ctxl" style="color:{ctx_color}">CTX: {ctx_label}</span>
-            <span class="ctxd">{ctx_reason} | risk:{ctx_risk}</span>
+        <div class="sbar">
+            <div class="sc" style="background:#1a2535"><span class="sl">LIVE</span></div>
+            <div class="sc"><span class="sv" style="color:{UI['warning']}">{time_str}</span></div>
+            <div class="sc"><span class="sl">WIN</span><span class="sv">{ws}</span><span class="sv {vc(wc)}">{wcc}</span></div>
+            <div class="sc"><span class="sl">DXY</span><span class="sv {vc(dxy.get('change_pct'))}">{sfd(dxy, 'change_pct', '+.2f', '---')}%</span></div>
+            <div class="sc"><span class="sl">VIX</span><span class="sv" style="color:{UI['warning']}">{sfd(vix, 'current_price', '.1f', '---')}</span></div>
+            <div class="sc"><span class="sl">EWZ</span><span class="sv {vc(ewz.get('change_pct'))}">{sfd(ewz, 'change_pct', '+.2f', '---')}%</span></div>
+            <div class="sc">{srctag}<span class="sv" style="color:{UI['text_muted']}">{sr.get('assets_available',0)}/{sr.get('assets_total',0)}</span></div>
+            <div class="sc"><span class="sl">CT</span><span class="sv" style="color:{UI['text_secondary']}">{win_contract}</span></div>
+            <div class="sc">{cal_icon}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ==== 4c. RECOVERY / REGIME / REVERSAL BANNERS ====
-    if recovery and recovery.get("detected"):
-        rc = recovery["color"]
-        st.markdown(f'<div class="recb" style="border-left-color:{rc};background:{rc}08"><span class="recl" style="color:{rc}">RECUPERACAO {recovery["strength"]}</span><span class="recd">{recovery["description"][:80]}</span></div>', unsafe_allow_html=True)
-    elif rev_down and rev_down.get("detected"):
-        rc2 = rev_down["color"]
-        st.markdown(f'<div class="recb" style="border-left-color:{rc2};background:{rc2}08"><span class="recl" style="color:{rc2}">REVERSAO BAIXA {rev_down["strength"]}</span><span class="recd">{rev_down["description"][:80]}</span></div>', unsafe_allow_html=True)
+        # ==== 2. SCORE ROW ====
+        dtxt = "COMPRA" if score > 0 else "VENDA" if score < 0 else "NEUTRO"
+        dbg = f"{UI['positive']}22" if score > 0 else f"{UI['negative']}22" if score < 0 else f"{UI['neutral']}22"
+        dcol = UI['positive'] if score > 0 else UI['negative'] if score < 0 else UI['neutral']
+        trend = "MELHORANDO" if delta_val > 5 else "PIORANDO" if delta_val < -5 else "ESTAVEL"
+        if conf and conf.get("score_delta_aligned"): trend += " | CONF"
+        ipct = max(0, min(100, (score + 100) / 200 * 100))
+        glow = "sglow" if UI.get("score_glow", True) else ""
 
-    if regime_result:
-        regime_type = regime_result.get("regime", "INDEFINIDO")
-        if regime_type != "INDEFINIDO":
-            regime_color = regime_result.get("color", UI['neutral'])
-            regime_label = regime_result.get("label", "")
-            rd_obj = st.session_state.get("regime_detector")
-            regime_rec = rd_obj.get_trading_recommendation() if rd_obj and hasattr(rd_obj, 'get_trading_recommendation') else {}
-            regime_approach = regime_rec.get("approach", "") if regime_rec else ""
-            regime_risk = regime_rec.get("risk_level", "") if regime_rec else ""
-            st.markdown(f'<div class="recb" style="border-left-color:{regime_color};background:{regime_color}08"><span class="recl" style="color:{regime_color}">REGIME: {regime_label}</span><span class="recd">{regime_approach} | risk:{regime_risk}</span></div>', unsafe_allow_html=True)
+        ema_val = smoothed.get("ema_value") if smoothed else None
+        ema_delta = smoothed.get("ema_delta") if smoothed else None
+        ema_color = get_score_color(ema_val) if ema_val is not None else score_color
+        ema_str = sf(ema_val, "+.1f", "---")
+        ema_delta_str = f"({sf(ema_delta, '+.1f', '')})" if ema_delta is not None else ""
 
-    if reversal_result and reversal_result.get("detected"):
-        rv_color = reversal_result.get("color", UI['neutral'])
-        rv_strength = reversal_result.get("strength", "")
-        rv_type = reversal_result.get("type", "")
-        rv_short = "DIVERG PRECO" + (" ALTA" if "ALTA" in rv_type else " BAIXA" if "BAIXA" in rv_type else "")
-        rv_momenta = reversal_result.get("momenta", {})
-        mom_strs = [f"{p}p:{v:+.2f}%" for p, v in rv_momenta.items() if v is not None] if rv_momenta else []
-        st.markdown(f'<div class="recb" style="border-left-color:{rv_color};background:{rv_color}12"><span class="recl" style="color:{rv_color}">{rv_short} {rv_strength}</span><span class="recd">{" ".join(mom_strs[:3])}</span></div>', unsafe_allow_html=True)
+        conf_score = confidence_result.get("confidence_score", 0) if confidence_result else 0
+        conf_score = conf_score if conf_score is not None else 0
+        conf_color = confidence_result.get("color", UI['neutral']) if confidence_result else UI['neutral']
 
-    # ==== 4d. STRUCTURAL CONTEXT ROW ====
-    if structural_result and structural_result.get("enabled"):
-        above_vwap = structural_result.get("above_vwap")
-        vwap_dist = structural_result.get("vwap_distance_pct")
-        ib_type = structural_result.get("ib_type", "---")
-        va_pos = structural_result.get("va_position", "---")
-        vwap_pos_str = "---"
-        if above_vwap is True:
-            vwap_pos_str = f"ACIMA {vwap_dist:+.2f}%" if vwap_dist is not None else "ACIMA"
-        elif above_vwap is False:
-            vwap_pos_str = f"ABAIXO {vwap_dist:+.2f}%" if vwap_dist is not None else "ABAIXO"
-        ib_color = "#4FC3F7" if ib_type == "EXPANDIDO" else "#FFD600" if ib_type == "CONTRAIDO" else UI['text_muted']
-        va_color = "#00E676" if va_pos == "ACIMA_VA" else "#FF1744" if va_pos == "ABAIXO_VA" else UI['text_muted']
         st.markdown(f"""
-        <div class="struct-row">
-            <div class="struct-item"><span class="struct-lbl">VWAP</span><span class="struct-val" style="color:{UI['accent']}">{vwap_pos_str}</span></div>
-            <div class="struct-item"><span class="struct-lbl">IB</span><span class="struct-val" style="color:{ib_color}">{ib_type}</span></div>
-            <div class="struct-item"><span class="struct-lbl">VA</span><span class="struct-val" style="color:{va_color}">{va_pos}</span></div>
+        <div class="srow">
+            <div class="sdir" style="color:{dcol};background:{dbg}">{dtxt}</div>
+            <div class="smid">
+                <div class="snum {glow}" style="color:{score_color}">{sf(score, '+.1f', '0.0')}</div>
+                <div style="display:flex;align-items:baseline;justify-content:center;gap:3px">
+                    <span class="slbl">EMA</span>
+                    <span class="sema" style="color:{ema_color}">{ema_str}</span>
+                    <span class="slbl">{ema_delta_str}</span>
+                </div>
+                <div class="strend">{trend}</div>
+                <div class="zbar"><div class="zind" style="left:{ipct}%"></div></div>
+            </div>
+            <div class="srt">
+                <div class="sconf">conf:{signal.get('confidence','---')}</div>
+                <div class="sconf" style="color:{conf_color}">trust:{sf(conf_score, '.0f', '---')}</div>
+                <div class="sconf">n:{st.session_state.refresh_count}</div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ==== 4e. Calendar Event ====
-    if calendar_result and calendar_result.get("has_events"):
-        events = calendar_result.get("events", [])
-        ev_names = ", ".join(set(e.get("name", "") for e in events if e.get("name")))
-        if ev_names:
-            st.markdown(f'<div class="recb" style="border-left-color:#FF9800;background:#FF980008"><span class="recl" style="color:#FF9800">EVENTO: {ev_names}</span><span class="recd">Pesos ajustados automaticamente</span></div>', unsafe_allow_html=True)
+        # ==== 3. METRICS ====
+        sh = st.session_state.score_history
+        ac = 0
+        if len(sh) >= 3:
+            d1 = sh[-1]["score"] - sh[-2]["score"]
+            d2 = sh[-2]["score"] - sh[-3]["score"]
+            ac = d1 - d2
+        zl = "FORTE" if abs(score) > 60 else "MOD" if abs(score) > 30 else "NEU"
+        comp_score = compression_result.get("compression_score", 0) if compression_result else 0
+        comp_score = comp_score if comp_score is not None else 0
 
-    # ==== 5. SECTOR GRID ====
-    st.markdown('<div class="sech">SETORES <span class="secr">5m / 15m / dia</span></div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="mstrip">
+            <div class="mc"><div class="mv {vc(delta_val)}">{sf(delta_val, '+.1f', '---')}</div><div class="ml">Delta</div></div>
+            <div class="mc"><div class="mv {vc(mom_val)}">{sf(mom_val, '+.1f', '---')}</div><div class="ml">Mom</div></div>
+            <div class="mc"><div class="mv {vc(ac) if abs(ac)>2 else 'neu'}">{sf(ac, '+.1f', '---')}</div><div class="ml">Acel</div></div>
+            <div class="mc"><div class="mv" style="color:{score_color}">{zl}</div><div class="ml">Zona</div></div>
+            <div class="mc"><div class="mv" style="color:{conf_color}">{sf(conf_score, '.0f', '---')}</div><div class="ml">Trust</div></div>
+            <div class="mc"><div class="mv" style="color:{compression_result.get('color', UI['neutral']) if compression_result else UI['neutral']}">{sf(comp_score, '.0f', '---')}</div><div class="ml">Comp</div></div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    if sd:
-        shtml = '<div class="sgrid">'
-        for sn, sdata in sd.items():
-            sc3 = sdata.get("color", UI['neutral'])
-            ss = sdata.get("sector_score", 0)
-            ssc2 = UI['positive'] if ss > 0 else UI['negative'] if ss < 0 else UI['neutral']
-            ahtml = ""
-            for an, adata in sdata.get("assets", {}).items():
-                dn = adata.get("display_name", an)
-                cd = adata.get("change_pct")
-                c5 = adata.get("change_5m")
-                c15 = adata.get("change_15m")
-                ahtml += f"""<div class="sar">
+        # ==== 4. SIGNAL BANNER ====
+        et = entry.get("type", "NEUTRO") if entry else "NEUTRO"
+        el = entry.get("label", "SEM SINAL") if entry else "SEM SINAL"
+        ec = entry.get("confidence", "") if entry else ""
+        ea = entry.get("action", "") if entry else ""
+
+        if "COMPRA_FORTE" in et: sbg,sb,sc2 = "#0a2e0a",UI['positive'],UI['positive']
+        elif "COMPRA" in et and "RECUPERACAO" not in et: sbg,sb,sc2 = "#0a1f0a","#66BB6A","#66BB6A"
+        elif "RECUPERACAO_FORTE" in et: sbg,sb,sc2 = "#0a2e1a",UI['positive'],UI['positive']
+        elif "RECUPERACAO" in et: sbg,sb,sc2 = "#1a2e0a","#66BB6A","#66BB6A"
+        elif "VENDA_FORTE" in et: sbg,sb,sc2 = "#2e0a0a",UI['negative'],UI['negative']
+        elif "VENDA" in et and "REVERSAO" not in et: sbg,sb,sc2 = "#1f0a0a","#EF5350","#EF5350"
+        elif "REVERSAO_BAIXA_INTRADAY" in et: sbg,sb,sc2 = "#2e1a0a",UI['negative'],UI['negative']
+        elif "REVERSAO" in et: sbg,sb,sc2 = "#2e2a0a",UI['warning'],UI['warning']
+        else: sbg,sb,sc2 = UI['bg_secondary'],UI['border_color'],UI['neutral']
+
+        fs_action = filtered_signal.get("final_action", "") if filtered_signal else ""
+        fs_was_cooldown = filtered_signal.get("was_cooldown", False) if filtered_signal else False
+        fs_downgraded = filtered_signal.get("downgraded", False) if filtered_signal else False
+        filter_note = ""
+        if fs_was_cooldown:
+            filter_note = ' <span style="font-size:6px;color:#FF9800">COOLDOWN</span>'
+        elif fs_downgraded:
+            filter_note = f' <span style="font-size:6px;color:#FF9800">&rarr; {fs_action}</span>'
+
+        st.markdown(f"""
+        <div class="sigb" style="background:{sbg};border-color:{sb}30">
+            <div class="sigt" style="color:{sc2}">{el} <span style="font-size:6px;color:{sb}88">{ec}</span>{filter_note}</div>
+            <div class="siga">{ea}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ==== 4b. CONTEXT BANNER ====
+        if context_result:
+            ctx_label = context_result.get("label", "")
+            ctx_color = context_result.get("color", UI['neutral'])
+            ctx_risk = context_result.get("risk", "")
+            ctx_reason = context_result.get("reason", "")[:80]
+            st.markdown(f"""
+            <div class="ctxb" style="border-left-color:{ctx_color};background:{ctx_color}08">
+                <span class="ctxl" style="color:{ctx_color}">CTX: {ctx_label}</span>
+                <span class="ctxd">{ctx_reason} | risk:{ctx_risk}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ==== 4c. RECOVERY / REGIME / REVERSAL BANNERS ====
+        if recovery and recovery.get("detected"):
+            rc = recovery.get("color", UI['neutral'])
+            rc = rc if rc else UI['neutral']
+            st.markdown(f'<div class="recb" style="border-left-color:{rc};background:{rc}08"><span class="recl" style="color:{rc}">RECUPERACAO {recovery.get("strength","")}</span><span class="recd">{recovery.get("description","")[:80]}</span></div>', unsafe_allow_html=True)
+        elif rev_down and rev_down.get("detected"):
+            rc2 = rev_down.get("color", UI['neutral'])
+            rc2 = rc2 if rc2 else UI['neutral']
+            st.markdown(f'<div class="recb" style="border-left-color:{rc2};background:{rc2}08"><span class="recl" style="color:{rc2}">REVERSAO BAIXA {rev_down.get("strength","")}</span><span class="recd">{rev_down.get("description","")[:80]}</span></div>', unsafe_allow_html=True)
+
+        if regime_result:
+            regime_type = regime_result.get("regime", "INDEFINIDO")
+            if regime_type != "INDEFINIDO":
+                regime_color = regime_result.get("color", UI['neutral'])
+                regime_label = regime_result.get("label", "")
+                rd_obj = st.session_state.get("regime_detector")
+                regime_rec = rd_obj.get_trading_recommendation() if rd_obj and hasattr(rd_obj, 'get_trading_recommendation') else {}
+                regime_approach = regime_rec.get("approach", "") if regime_rec else ""
+                regime_risk = regime_rec.get("risk_level", "") if regime_rec else ""
+                st.markdown(f'<div class="recb" style="border-left-color:{regime_color};background:{regime_color}08"><span class="recl" style="color:{regime_color}">REGIME: {regime_label}</span><span class="recd">{regime_approach} | risk:{regime_risk}</span></div>', unsafe_allow_html=True)
+
+        if reversal_result and reversal_result.get("detected"):
+            rv_color = reversal_result.get("color", UI['neutral'])
+            rv_strength = reversal_result.get("strength", "")
+            rv_type = reversal_result.get("type", "")
+            rv_short = "DIVERG PRECO" + (" ALTA" if "ALTA" in rv_type else " BAIXA" if "BAIXA" in rv_type else "")
+            rv_momenta = reversal_result.get("momenta", {})
+            mom_strs = [f"{p}p:{v:+.2f}%" for p, v in rv_momenta.items() if v is not None] if rv_momenta else []
+            st.markdown(f'<div class="recb" style="border-left-color:{rv_color};background:{rv_color}12"><span class="recl" style="color:{rv_color}">{rv_short} {rv_strength}</span><span class="recd">{" ".join(mom_strs[:3])}</span></div>', unsafe_allow_html=True)
+
+        # ==== 4d. STRUCTURAL CONTEXT ROW ====
+        if structural_result and structural_result.get("enabled"):
+            above_vwap = structural_result.get("above_vwap")
+            vwap_dist = structural_result.get("vwap_distance_pct")
+            ib_type = structural_result.get("ib_type", "---")
+            va_pos = structural_result.get("va_position", "---")
+            vwap_pos_str = "---"
+            if above_vwap is True:
+                vwap_pos_str = f"ACIMA {sf(vwap_dist, '+.2f', '')}" if vwap_dist is not None else "ACIMA"
+            elif above_vwap is False:
+                vwap_pos_str = f"ABAIXO {sf(vwap_dist, '+.2f', '')}" if vwap_dist is not None else "ABAIXO"
+            ib_color = "#4FC3F7" if ib_type == "EXPANDIDO" else "#FFD600" if ib_type == "CONTRAIDO" else UI['text_muted']
+            va_color = "#00E676" if va_pos == "ACIMA_VA" else "#FF1744" if va_pos == "ABAIXO_VA" else UI['text_muted']
+            st.markdown(f"""
+            <div class="struct-row">
+                <div class="struct-item"><span class="struct-lbl">VWAP</span><span class="struct-val" style="color:{UI['accent']}">{vwap_pos_str}</span></div>
+                <div class="struct-item"><span class="struct-lbl">IB</span><span class="struct-val" style="color:{ib_color}">{ib_type}</span></div>
+                <div class="struct-item"><span class="struct-lbl">VA</span><span class="struct-val" style="color:{va_color}">{va_pos}</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ==== 4e. Calendar Event ====
+        if calendar_result and calendar_result.get("has_events"):
+            events = calendar_result.get("events", [])
+            ev_names = ", ".join(set(e.get("name", "") for e in events if e.get("name")))
+            if ev_names:
+                st.markdown(f'<div class="recb" style="border-left-color:#FF9800;background:#FF980008"><span class="recl" style="color:#FF9800">EVENTO: {ev_names}</span><span class="recd">Pesos ajustados automaticamente</span></div>', unsafe_allow_html=True)
+
+        # ==== 5. SECTOR GRID ====
+        st.markdown('<div class="sech">SETORES <span class="secr">5m / 15m / dia</span></div>', unsafe_allow_html=True)
+
+        if sd:
+            shtml = '<div class="sgrid">'
+            for sn, sdata in sd.items():
+                sc3 = sdata.get("color", UI['neutral'])
+                ss = sdata.get("sector_score", 0) or 0
+                ssc2 = UI['positive'] if ss > 0 else UI['negative'] if ss < 0 else UI['neutral']
+                ahtml = ""
+                for an, adata in sdata.get("assets", {}).items():
+                    dn = adata.get("display_name", an)
+                    cd = adata.get("change_pct")
+                    c5 = adata.get("change_5m")
+                    c15 = adata.get("change_15m")
+                    ahtml += f"""<div class="sar">
                     <span class="san">{dn}</span>
                     <span class="sv5 {vc(c5)}">{vs(c5) if c5 is not None else '---'}</span>
                     <span class="sv5 {vc(c15)}">{vs(c15) if c15 is not None else '---'}</span>
                     <span class="svd {vc(cd)}">{vs(cd) if cd is not None else '---'}</span>
                 </div>"""
-            shtml += f"""<div class="sblk" style="border-left:2px solid {sc3}30">
-                <div class="shdr"><span class="snm" style="color:{sc3}">{sdata.get('icon','')} {sn}</span><span class="ssc" style="color:{ssc2}">{ss:+.0f}</span></div>
+                shtml += f"""<div class="sblk" style="border-left:2px solid {sc3}30">
+                <div class="shdr"><span class="snm" style="color:{sc3}">{sdata.get('icon','')} {sn}</span><span class="ssc" style="color:{ssc2}">{sf(ss, '+.0f', '---')}</span></div>
                 {ahtml}
             </div>"""
-        shtml += '</div>'
-        st.markdown(shtml, unsafe_allow_html=True)
+            shtml += '</div>'
+            st.markdown(shtml, unsafe_allow_html=True)
 
-        sm2 = st.session_state.get("sector_manager")
-        if sm2 and hasattr(sm2, 'get_market_feeling'):
-            try:
-                feeling = sm2.get_market_feeling(sd)
-                fc = UI['positive'] if feeling['direction'] > 10 else UI['negative'] if feeling['direction'] < -10 else UI['neutral']
-                st.markdown(f"""
-                <div class="fbar">
-                    <span class="fbl">FEELING</span>
-                    <span class="fbv" style="color:{fc}">{feeling['feeling']}</span>
-                    <span class="fbd">({feeling['direction']:+.0f})</span>
-                    <span class="fbd" style="flex:1;text-align:right">altas:{feeling.get('bullish_sectors',0)} baixas:{feeling.get('bearish_sectors',0)}/{feeling.get('total_sectors',0)}</span>
-                </div>
-                """, unsafe_allow_html=True)
-            except Exception as e:
-                logger.warning(f"Feeling error: {e}")
-    else:
-        st.markdown(f'<div style="padding:2px;color:{UI["text_muted"]};font-size:7px;text-align:center">Carregando setores...</div>', unsafe_allow_html=True)
+            sm2 = st.session_state.get("sector_manager")
+            if sm2 and hasattr(sm2, 'get_market_feeling'):
+                try:
+                    feeling = sm2.get_market_feeling(sd)
+                    feeling_dir = feeling.get('direction', 0) or 0
+                    fc = UI['positive'] if feeling_dir > 10 else UI['negative'] if feeling_dir < -10 else UI['neutral']
+                    st.markdown(f"""
+                    <div class="fbar">
+                        <span class="fbl">FEELING</span>
+                        <span class="fbv" style="color:{fc}">{feeling.get('feeling','---')}</span>
+                        <span class="fbd">({sf(feeling_dir, '+.0f', '---')})</span>
+                        <span class="fbd" style="flex:1;text-align:right">altas:{feeling.get('bullish_sectors',0)} baixas:{feeling.get('bearish_sectors',0)}/{feeling.get('total_sectors',0)}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                except Exception as e:
+                    logger.warning(f"Feeling error: {e}")
+        else:
+            st.markdown(f'<div style="padding:2px;color:{UI["text_muted"]};font-size:7px;text-align:center">Carregando setores...</div>', unsafe_allow_html=True)
 
-    # ==== 6. DIVERGENCIA ====
-    dt_div = div.get("type", "INDEFINIDO") if div else "INDEFINIDO"
-    if dt_div not in ("INDEFINIDO", "NEUTRO"):
-        dc = div.get("color", UI['neutral'])
-        dl = div.get("label", "")
-        dd = div.get("description", "")[:70] if div.get("description") else ""
-        st.markdown(f'<div class="recb" style="border-left-color:{dc};background:{dc}08"><span class="recl" style="color:{dc}">{div.get("icon","")} {dl}</span><span class="recd">{dd}</span></div>', unsafe_allow_html=True)
+        # ==== 6. DIVERGENCIA ====
+        dt_div = div.get("type", "INDEFINIDO") if div else "INDEFINIDO"
+        if dt_div not in ("INDEFINIDO", "NEUTRO"):
+            dc = div.get("color", UI['neutral'])
+            dl = div.get("label", "")
+            dd = div.get("description", "")[:70] if div.get("description") else ""
+            st.markdown(f'<div class="recb" style="border-left-color:{dc};background:{dc}08"><span class="recl" style="color:{dc}">{div.get("icon","")} {dl}</span><span class="recd">{dd}</span></div>', unsafe_allow_html=True)
 
-    # ==== 7 & 8. LEVELS + FILTERS ====
-    st.markdown('<div class="sech">REGIOES INDICE <span class="secr">S/R</span></div>', unsafe_allow_html=True)
+        # ==== 7 & 8. LEVELS + FILTERS ====
+        st.markdown('<div class="sech">REGIOES INDICE <span class="secr">S/R</span></div>', unsafe_allow_html=True)
 
-    left_html = ""
-    right_html = ""
+        left_html = ""
+        right_html = ""
 
-    if lr and lr.get("available"):
-        lvs = lr.get("levels", {})
-        cp = lr.get("current_price")
-        lt = {"R3":("res",UI['level_resistance']),"R2":("res",UI['level_resistance']),"R1":("res",UI['level_resistance']),
-              "PIVOT":("pvt",UI['level_pivot']),"S1":("sup",UI['level_support']),"S2":("sup",UI['level_support']),"S3":("sup",UI['level_support'])}
-        for ln in ["R3","R2","R1","PIVOT","S1","S2","S3"]:
-            if ln not in lvs: continue
-            lv = lvs[ln]
-            lty, lc = lt.get(ln, ("neu", UI['neutral']))
-            ds = ""
-            if cp:
-                d = lv - cp
-                dp = (d/cp)*100
-                ds = f"{d:+,.0f} ({dp:+.1f}%)"
-            left_html += f"""<div class="lrow"><div class="ldot" style="background:{lc}"></div>
-                <span class="lnm" style="color:{lc}">{ln}</span>
-                <span class="lpr" style="color:{lc}">{lv:,.0f}</span>
-                <span class="ldi">{ds}</span></div>"""
-            if ln == "R1" and cp:
-                left_html += f"""<div class="lcur"><span class="lcul">WIN {cp:,.0f}</span></div>"""
-    else:
-        msg = lr.get("message", "Aguardando dados") if lr else "Aguardando"
-        left_html = f'<div style="padding:2px;color:{UI["text_muted"]};font-size:6px;text-align:center">{msg}</div>'
+        if lr and lr.get("available"):
+            lvs = lr.get("levels", {})
+            cp = lr.get("current_price")
+            lt = {"R3":("res",UI['level_resistance']),"R2":("res",UI['level_resistance']),"R1":("res",UI['level_resistance']),
+                  "PIVOT":("pvt",UI['level_pivot']),"S1":("sup",UI['level_support']),"S2":("sup",UI['level_support']),"S3":("sup",UI['level_support'])}
+            for ln in ["R3","R2","R1","PIVOT","S1","S2","S3"]:
+                if ln not in lvs: continue
+                lv = lvs[ln]
+                lty, lc = lt.get(ln, ("neu", UI['neutral']))
+                ds = ""
+                if cp and lv is not None:
+                    d = lv - cp
+                    dp = (d/cp)*100
+                    ds = f"{d:+,.0f} ({sf(dp, '+.1f', '---')}%)"
+                left_html += f"""<div class="lrow"><div class="ldot" style="background:{lc}"></div>
+                    <span class="lnm" style="color:{lc}">{ln}</span>
+                    <span class="lpr" style="color:{lc}">{sf(lv, ',.0f', '---')}</span>
+                    <span class="ldi">{ds}</span></div>"""
+                if ln == "R1" and cp:
+                    left_html += f"""<div class="lcur"><span class="lcul">WIN {sf(cp, ',.0f', '---')}</span></div>"""
+        else:
+            msg = lr.get("message", "Aguardando dados") if lr else "Aguardando"
+            left_html = f'<div style="padding:2px;color:{UI["text_muted"]};font-size:6px;text-align:center">{msg}</div>'
 
-    # Filters
-    sz = abs(score) < 4
-    szc = "wrn" if sz else "pos"
-    szi = "&#9888;" if sz else "&#10003;"
-    ct = "Ok"; ctc = "pos"
-    if len(sh) >= 4:
-        rs = [h["score"] for h in sh[-4:]]
-        sd2 = all(s > 0 for s in rs) or all(s < 0 for s in rs)
-        if sd2: ct = "Confirmado"; ctc = "pos"
-        else: ct = "Instavel"; ctc = "wrn"
-    at = "estavel"; atc = "neu"
-    if ac > 5: at = "acel alta"; atc = "pos"
-    elif ac < -5: at = "acel baixa"; atc = "neg"
-    dok = dt_div not in ("DIVERGENCIA_ALTA", "DIVERGENCIA_BAIXA")
-    dvt = "Ok" if dok else "DIVERG"
-    dvc = "pos" if dok else "wrn"
-    rvt = "Sim" if recovery and recovery.get("detected") else "---"
-    rvc = "pos" if recovery and recovery.get("detected") else "neu"
+        # Filters
+        sz = abs(score) < 4
+        szc = "wrn" if sz else "pos"
+        szi = "&#9888;" if sz else "&#10003;"
+        ct = "Ok"; ctc = "pos"
+        if len(sh) >= 4:
+            rs = [h["score"] for h in sh[-4:]]
+            sd2 = all(s > 0 for s in rs) or all(s < 0 for s in rs)
+            if sd2: ct = "Confirmado"; ctc = "pos"
+            else: ct = "Instavel"; ctc = "wrn"
+        at = "estavel"; atc = "neu"
+        if ac > 5: at = "acel alta"; atc = "pos"
+        elif ac < -5: at = "acel baixa"; atc = "neg"
+        dok = dt_div not in ("DIVERGENCIA_ALTA", "DIVERGENCIA_BAIXA")
+        dvt = "Ok" if dok else "DIVERG"
+        dvc = "pos" if dok else "wrn"
+        rvt = "Sim" if recovery and recovery.get("detected") else "---"
+        rvc = "pos" if recovery and recovery.get("detected") else "neu"
 
-    filters = [
-        (szi, "Score zona", f"{score:+.1f}", szc),
-        ("&#10003;", "Estab", ct, ctc),
-        ("&#9670;", "Acel", at, atc),
-        ("&#9670;", "Diverg", dvt, dvc),
-        ("&#8634;", "Recup", rvt, rvc),
-    ]
+        filters = [
+            (szi, "Score zona", sf(score, '+.1f', '---'), szc),
+            ("&#10003;", "Estab", ct, ctc),
+            ("&#9670;", "Acel", at, atc),
+            ("&#9670;", "Diverg", dvt, dvc),
+            ("&#8634;", "Recup", rvt, rvc),
+        ]
 
-    filter_details = filtered_signal.get("filter_details", {}) if filtered_signal else {}
-    confluence_count = filtered_signal.get("confluence_count", 0) if filtered_signal else 0
-    min_confluence = SIGNAL_FILTER_CONFIG.get("min_confluence_filters", 3) if SIGNAL_FILTER_CONFIG else 3
+        filter_details = filtered_signal.get("filter_details", {}) if filtered_signal else {}
+        confluence_count = filtered_signal.get("confluence_count", 0) if filtered_signal else 0
+        min_confluence = SIGNAL_FILTER_CONFIG.get("min_confluence_filters", 3) if SIGNAL_FILTER_CONFIG else 3
 
-    conf_filters = [("score_zone","ScZone"),("delta_direction","Delta"),("momentum_confirm","MomCfm"),("not_in_divergence","NoDiv"),("recovery_confirmed","Recup")]
-    for fkey, flabel in conf_filters:
-        fd = filter_details.get(fkey, {})
-        f_passed = fd.get("passed", False) if fd else False
-        fi = "&#10003;" if f_passed else "&#10007;"
-        fc2 = "pos" if f_passed else "wrn"
-        filters.append((fi, flabel, f"{confluence_count}/{min_confluence}" if fkey == conf_filters[0][0] else "", fc2))
+        conf_filters = [("score_zone","ScZone"),("delta_direction","Delta"),("momentum_confirm","MomCfm"),("not_in_divergence","NoDiv"),("recovery_confirmed","Recup")]
+        for fkey, flabel in conf_filters:
+            fd = filter_details.get(fkey, {})
+            f_passed = fd.get("passed", False) if fd else False
+            fi = "&#10003;" if f_passed else "&#10007;"
+            fc2 = "pos" if f_passed else "wrn"
+            filters.append((fi, flabel, f"{confluence_count}/{min_confluence}" if fkey == conf_filters[0][0] else "", fc2))
 
-    for fi, ft, fv, fc2 in filters:
-        right_html += f"""<div class="frow"><span class="fico {fc2}">{fi}</span><span class="ftxt">{ft}</span><span class="fval {fc2}">{fv}</span></div>"""
+        for fi, ft, fv, fc2 in filters:
+            right_html += f"""<div class="frow"><span class="fico {fc2}">{fi}</span><span class="ftxt">{ft}</span><span class="fval {fc2}">{fv}</span></div>"""
 
-    st.markdown(f"""
-    <div class="twocol">
-        <div style="padding:1px">{left_html}</div>
-        <div style="padding:1px">{right_html}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ==== 9. SIGNAL LOG + PERF ====
-    slog = st.session_state.signal_log
-    if slog:
-        st.markdown('<div class="sech">SINAIS <span class="secr">ultimos</span></div>', unsafe_allow_html=True)
-        lhtml = '<table class="ltbl"><tr><th>Hora</th><th>Dir</th><th>Score</th><th>Delta</th><th>Filtrado</th></tr>'
-        for s in slog[-5:]:
-            lhtml += f'<tr><td>{s["time"]}</td><td class="{vc(s["score"])}">{s["direction"][:15]}</td><td>{s["score"]:+.0f}</td><td>{s["delta"]:+.1f}</td><td>{s.get("filtered","")[:12]}</td></tr>'
-        lhtml += '</table>'
-        st.markdown(lhtml, unsafe_allow_html=True)
-
-    if perf_stats and perf_stats.get("total_signals", 0) > 0:
-        wr = perf_stats.get("win_rate", 0)
-        payoff = perf_stats.get("payoff_ratio", 0)
-        total = perf_stats.get("total_signals", 0)
-        wins = perf_stats.get("total_wins", 0)
-        losses = perf_stats.get("total_losses", 0)
-        wr_color = UI['positive'] if wr > 50 else UI['negative']
         st.markdown(f"""
-        <div class="fbar">
-            <span class="fbl">PERF</span>
-            <span class="fbv" style="color:{wr_color}">WR {wr:.0f}%</span>
-            <span class="fbd">Payoff {payoff:.1f}x</span>
-            <span class="fbd" style="flex:1;text-align:right">{wins}W/{losses}L/{total}total</span>
+        <div class="twocol">
+            <div style="padding:1px">{left_html}</div>
+            <div style="padding:1px">{right_html}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ==== 10. AUTO-REFRESH ====
-    interval = st.session_state.get("interval", 30)
-    try:
-        time.sleep(1)
-    except Exception:
-        pass
-    # Auto-refresh using meta tag instead of time.sleep
-    st.markdown(f"""
-    <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-        AUTO-REFRESH {interval}s | v6.2 | Context + Structural + Dynamic + Confidence
-    </div>
-    <meta http-equiv="refresh" content="{interval}">
-    """, unsafe_allow_html=True)
+        # ==== 9. SIGNAL LOG + PERF ====
+        slog = st.session_state.signal_log
+        if slog:
+            st.markdown('<div class="sech">SINAIS <span class="secr">ultimos</span></div>', unsafe_allow_html=True)
+            lhtml = '<table class="ltbl"><tr><th>Hora</th><th>Dir</th><th>Score</th><th>Delta</th><th>Filtrado</th></tr>'
+            for s in slog[-5:]:
+                lhtml += f'<tr><td>{s.get("time","")}</td><td class="{vc(s.get("score"))}">{s.get("direction","")[:15]}</td><td>{sf(s.get("score"), "+.0f", "---")}</td><td>{sf(s.get("delta"), "+.1f", "---")}</td><td>{s.get("filtered","")[:12]}</td></tr>'
+            lhtml += '</table>'
+            st.markdown(lhtml, unsafe_allow_html=True)
+
+        if perf_stats and perf_stats.get("total_signals", 0) > 0:
+            wr = perf_stats.get("win_rate", 0) or 0
+            payoff = perf_stats.get("payoff_ratio", 0) or 0
+            total = perf_stats.get("total_signals", 0) or 0
+            wins = perf_stats.get("total_wins", 0) or 0
+            losses = perf_stats.get("total_losses", 0) or 0
+            wr_color = UI['positive'] if wr > 50 else UI['negative']
+            st.markdown(f"""
+            <div class="fbar">
+                <span class="fbl">PERF</span>
+                <span class="fbv" style="color:{wr_color}">WR {sf(wr, '.0f', '---')}%</span>
+                <span class="fbd">Payoff {sf(payoff, '.1f', '---')}x</span>
+                <span class="fbd" style="flex:1;text-align:right">{wins}W/{losses}L/{total}total</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ==== 10. AUTO-REFRESH (v6.3: JS-based, no meta tag) ====
+        interval = st.session_state.get("interval", 30)
+        try:
+            time.sleep(1)
+        except Exception:
+            pass
+        # Safe auto-refresh using JavaScript instead of <meta http-equiv="refresh">
+        # The meta tag conflicts with Streamlit's state management on Windows
+        st.markdown(f"""
+        <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
+            AUTO-REFRESH {interval}s | v6.3 | Context + Structural + Dynamic + Confidence
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""<script>
+        setTimeout(function(){{window.location.reload()}}, {interval * 1000});
+        </script>""", unsafe_allow_html=True)
+
+    # ====== GLOBAL ERROR HANDLER (v6.3) ======
+    except Exception as e:
+        logger.error(f"Layout error: {e}\n{traceback.format_exc()}")
+        st.markdown(f"""
+        <div class="err-display">
+            <div class="err-title">ERRO NO DASHBOARD</div>
+            <div>Tipo: {type(e).__name__}</div>
+            <div>Mensagem: {str(e)}</div>
+            <div class="err-trace">{traceback.format_exc()}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        # Also show via native Streamlit for maximum visibility
+        st.error(f"Erro no dashboard: {type(e).__name__}: {e}")
+        with st.expander("Traceback completo"):
+            st.code(traceback.format_exc())
+        # Manual refresh button
+        if st.button("Tentar novamente"):
+            st.rerun()
 
 
 with tab_analysis:
-    if render_analysis_tab:
-        try:
+    try:
+        if render_analysis_tab:
             render_analysis_tab()
-        except Exception as e:
-            st.error(f"Erro na aba de analise: {e}")
-    else:
-        st.info("Modulo de analise nao disponivel.")
+        else:
+            st.info("Modulo de analise nao disponivel.")
+    except Exception as e:
+        st.error(f"Erro na aba de analise: {e}")
+        with st.expander("Detalhes"):
+            st.code(traceback.format_exc())
