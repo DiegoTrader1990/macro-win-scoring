@@ -7,6 +7,7 @@ Fallback para ativos B3 quando MT5 não está disponível.
 
 import logging
 from datetime import datetime, timedelta
+import pandas as pd
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -216,7 +217,7 @@ class YahooFinanceBatch:
     def download_batch(symbols: dict, period: str = "5d") -> Dict[str, dict]:
         """
         Usa yf.download para buscar múltiplos ativos de uma vez.
-        Mais eficiente que buscar um por um.
+        v8.0: Handles new yfinance MultiIndex columns format + timeout.
         
         Args:
             symbols: Dict {nome_interno: ticker_yf}
@@ -228,30 +229,62 @@ class YahooFinanceBatch:
         if not YF_AVAILABLE:
             return {}
         
+        if not symbols:
+            return {}
+        
         try:
             tickers = list(symbols.values())
             names = list(symbols.keys())
             
-            # Download em lote
-            data = yf.download(tickers, period=period, group_by="ticker", threads=True)
+            # Download em lote - with auto_adjust and timeout
+            data = yf.download(tickers, period=period, group_by="ticker", 
+                              threads=True, progress=False)
+            
+            if data is None or data.empty:
+                logger.warning("YF Batch: No data returned")
+                return {}
+            
+            # Handle both old and new yfinance column formats
+            is_multi_ticker = len(tickers) > 1
+            is_multiindex = isinstance(data.columns, pd.MultiIndex)
             
             results = {}
             for name, yf_symbol in symbols.items():
                 try:
-                    if len(tickers) > 1:
-                        ticker_data = data[yf_symbol]
+                    # Get Close column for this ticker
+                    close_series = None
+                    
+                    if is_multiindex:
+                        # New yfinance: columns are (Price, Ticker) or (Ticker, Price)
+                        # Try (Close, ticker) format
+                        try:
+                            close_series = data[('Close', yf_symbol)].dropna()
+                        except (KeyError, TypeError):
+                            try:
+                                close_series = data[(yf_symbol, 'Close')].dropna()
+                            except (KeyError, TypeError):
+                                # Try filtering
+                                close_cols = [c for c in data.columns if c[0] == 'Close' and yf_symbol in str(c)]
+                                if close_cols:
+                                    close_series = data[close_cols[0]].dropna()
+                    elif is_multi_ticker:
+                        # Old format: data[ticker]['Close']
+                        try:
+                            ticker_data = data[yf_symbol]
+                            close_series = ticker_data['Close'].dropna()
+                        except (KeyError, TypeError):
+                            pass
                     else:
-                        ticker_data = data
+                        # Single ticker: data['Close']
+                        try:
+                            close_series = data['Close'].dropna()
+                        except (KeyError, TypeError):
+                            pass
                     
-                    if ticker_data.empty:
+                    if close_series is None or len(close_series) < 1:
                         continue
                     
-                    # Remove linhas com NaN no Close
-                    close_data = ticker_data['Close'].dropna()
-                    if len(close_data) < 1:
-                        continue
-                    
-                    current_price = float(close_data.iloc[-1])
+                    current_price = float(close_series.iloc[-1])
                     
                     result = {
                         "source": "yahoo_finance_batch",
@@ -261,8 +294,8 @@ class YahooFinanceBatch:
                         "timestamp": datetime.now(),
                     }
                     
-                    if len(close_data) >= 2:
-                        prev_close = float(close_data.iloc[-2])
+                    if len(close_series) >= 2:
+                        prev_close = float(close_series.iloc[-2])
                         result["previous_close"] = prev_close
                         result["change_pct"] = ((current_price - prev_close) / prev_close) * 100
                         result["change_points"] = current_price - prev_close

@@ -922,13 +922,73 @@ with tab_mesa:
             if not st.button("Tentar mesmo assim (modo limitado)"):
                 st.stop()
 
+        # v8.0: Robust loading with timeout and progress
         if not st.session_state.get("score_result"):
-            with st.spinner("Conectando..."):
-                refresh_data()
+            import threading
+            import time as _time
+            
+            status_text = st.empty()
+            progress_bar = st.progress(0)
+            
+            status_text.text("Conectando ao Yahoo Finance...")
+            progress_bar.progress(20)
+            
+            # Run refresh with timeout (30 seconds max)
+            _refresh_error = [None]
+            _refresh_done = [False]
+            
+            def _do_refresh():
+                try:
+                    refresh_data()
+                    _refresh_done[0] = True
+                except Exception as e:
+                    _refresh_error[0] = str(e)
+            
+            _refresh_thread = threading.Thread(target=_do_refresh, daemon=True)
+            _refresh_thread.start()
+            
+            # Wait with progress updates
+            _waited = 0
+            while _refresh_thread.is_alive() and _waited < 30:
+                _time.sleep(0.5)
+                _waited += 0.5
+                pct = min(20 + int(_waited / 30 * 70), 90)
+                progress_bar.progress(pct)
+                if _waited > 5:
+                    status_text.text(f"Baixando dados... ({_waited:.0f}s)")
+                elif _waited > 2:
+                    status_text.text("Buscando cotações...")
+            
+            progress_bar.progress(95)
+            status_text.text("Calculando score...")
+            
+            if _refresh_error[0]:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"Erro ao buscar dados: {_refresh_error[0]}")
+                st.info("Verifique sua conexao com internet e tente novamente.")
+                if st.button("Tentar novamente"):
+                    st.session_state.score_result = {}
+                    st.rerun()
+                st.stop()
+            
+            if not _refresh_done[0]:
+                progress_bar.empty()
+                status_text.empty()
+                st.warning("Timeout: dados demoraram mais de 30s. Usando dados parciais.")
+            
+            progress_bar.progress(100)
+            _time.sleep(0.3)
+            progress_bar.empty()
+            status_text.empty()
 
         sr = st.session_state.get("score_result", {})
         if not sr:
             st.error("Sem dados. Verifique conexao com internet.")
+            st.info("Possiveis causas: internet lenta, Yahoo Finance offline, ou firewall bloqueando.")
+            if st.button("Tentar novamente"):
+                st.session_state.score_result = {}
+                st.rerun()
             st.stop()
 
         score = sr.get("score", 0) or 0

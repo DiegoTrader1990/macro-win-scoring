@@ -60,6 +60,7 @@ MT5_SYMBOLS = {
 # MAPEAMENTO DE ATIVOS - YAHOO FINANCE
 # ============================================================
 YF_SYMBOLS = {
+    "WDO": "BRL=X",
     "SP500": "^GSPC",
     "ES_FUTURES": "ES=F",
     "DAX": "^GDAXI",
