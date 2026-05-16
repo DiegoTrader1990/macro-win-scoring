@@ -166,7 +166,7 @@ def validate_all_correlations():
         # Pegar peso atual do config
         current_weight = MACRO_WEIGHTS.get(name, {})
         weight = current_weight.get("weight", 0)
-        configured_corr = current_weight.get("corr", 0)
+        configured_corr = current_weight.get("corr_intraday") or current_weight.get("corr", 0)
         tier = current_weight.get("tier", "N/A")
         category = current_weight.get("category", "N/A")
 

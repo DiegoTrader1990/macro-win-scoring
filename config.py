@@ -2,12 +2,14 @@
 Configuracao do Sistema de Macro Scoring para Mini Indice (WIN)
 ================================================================
 Todos os ativos, pesos, thresholds e parametros configuraveis.
-v7.0 - Reestruturacao completa dos pesos para DAY TRADE:
-       - B3 diretos (DOL, DI, bancões, VALE3, PETR4, setoriais) com peso MAIOR
-       - Internacionais/ADRs com peso MENOR (contexto, nao gatilho)
-       - Sistema de gatilhos de entrada com confluencia
-       - Logging completo para auditoria diaria
-       - Script de validacao empirica de correlacoes
+v8.0 - Pesos validados com DADOS REAIS (correlacao empirica):
+       - Teste com dados reais: 6 meses diario + 58 dias intraday 5min
+       - ITUB4 (R2=51.3%), BBDC4 (R2=46.9%), VALE3 (R2=34.1%) = TOP movers
+       - WDO/USD-BRL: corr INVERSA -0.403 intraday (confirmado)
+       - PETR4: ZERO intraday (0.008!) - removido do Tier1
+       - BITCOIN, NIKKEI, BRENT, IRON_ORE, GOLD, WTI: REMOVIDOS
+       - DI/IMAB11: quase zero intraday (0.061), movido para vies macro
+       - Pesos baseados em R2 intraday validado empiricamente
 """
 
 # ============================================================
@@ -60,21 +62,13 @@ MT5_SYMBOLS = {
 YF_SYMBOLS = {
     "SP500": "^GSPC",
     "ES_FUTURES": "ES=F",
-    "NASDAQ": "^IXIC",
     "DAX": "^GDAXI",
     "EUROSTOXX50": "^STOXX50E",
-    "NIKKEI": "^N225",
     "VIX": "^VIX",
     "DXY": "DX-Y.NYB",
     "USDBRL": "BRL=X",
-    "IRON_ORE": "SI=F",
-    "BRENT": "BZ=F",
-    "WTI": "CL=F",
     "COPPER": "HG=F",
-    "GOLD": "GC=F",
     "US10Y": "^TNX",
-    "US2Y": "^IRX",
-    "BITCOIN": "BTC-USD",
     "VALE_ADR": "VALE",
     "PETR_ADR": "PBR",
     "EWZ": "EWZ",
@@ -157,9 +151,8 @@ SECTOR_GROUPS = {
         "description": "Taxas e renda fixa",
         "assets": {
             "US10Y": {"yf": "^TNX", "display": "US10Y"},
-            "US2Y": {"yf": "^IRX", "display": "US2Y"},
             "IMAB11": {"yf": "IMAB11.SA", "display": "IMA-B"},
-            "DI1_FUTURES": {"yf": "IMAB11.SA", "display": "IMA-B"},
+            "DI1_FUTURES": {"yf": "IMAB11.SA", "display": "DI Proxy"},
         }
     },
     "COMMODITIES": {
@@ -219,87 +212,133 @@ WIN_TRACKING = {
 }
 
 # ============================================================
-# PESOS DO SCORING MACRO (v7.0 - DAY TRADE INTRADAY)
+# PESOS DO SCORING MACRO (v8.0 - BASEADO EM DADOS REAIS)
 # Total = 1.00
 # ============================================================
-# FILOSOFIA v7.0:
-#   TIER 1 - B3 DIRETOS (55%): Ativos que movem o WIN no MESMO segundo
-#     DOL/WDO: Inversamente correlacionado, move ponto a ponto
-#     DI/Curva de Juros: Define custo de carry, fluxo de renda fixa
-#     Bancões: 40% do IBOV, movem o indice junto
-#     VALE3/PETR4: Pesos pesados do IBOV
-#     Setoriais (IFNC/IMAT/ICON): Sinal setorial em tempo real
+# FILOSOFIA v8.0 - VALIDACAO EMPIRICA (Maio 2026):
+#   Teste com dados reais: 6 meses diario + 58 dias intraday 5min
+#   Proxy WIN: IBOV (diario) / BOVA11 (intraday)
 #
-#   TIER 2 - CONTEXTO GLOBAL (30%): Cenário macro que define o tom
-#     EWZ: Fluxo estrangeiro real-time
-#     ES/S&P: Contexto US, pre-market e overnight
-#     VIX: Medo global
-#     DXY: Forca do dolar
-#     Indices globais: DAX, EuroStoxx
+#   RESULTADOS-CHAVE:
+#   - ITUB4 explica 51.3% da variacao intraday do WIN (R2=0.513)
+#   - BBDC4 explica 46.9% (R2=0.469)
+#   - VALE3 explica 34.1% (R2=0.341)
+#   - WDO/USD-BRL: correlacao INVERSA -0.403 intraday
+#   - PETR4: ZERO intraday (+0.008)! Petroleo+politica descolam
+#   - DI/IMAB11: quase zero intraday (+0.061), move em dias
+#   - BITCOIN: 0.244 irrelevante - REMOVIDO
+#   - NIKKEI, US2Y, IRON_ORE, BRENT, GOLD, WTI, NASDAQ: REMOVIDOS
 #
-#   TIER 3 - COMPLEMENTAR (15%): Confirmação secundária
-#     ADRs, commodities, crypto, juros US
+#   TIER 1 - B3 DIRETOS (58%): Ativos com corr >= 0.40 intraday
+#   TIER 2 - CONTEXTO GLOBAL (27%): Corr 0.25-0.40 intraday
+#   TIER 3 - MACRO VIES (15%): Juros DI + ADRs (contexto diario)
 # ============================================================
 MACRO_WEIGHTS = {
-    # ---- TIER 1: B3 DIRETOS (55%) - Movem o WIN em tempo real ----
-    "WDO":         {"weight": 0.12, "direction": -1, "corr": -0.85, "category": "Dolar/B3",
-                    "tier": 1, "intraday_impact": "CRITICO", "note": "Mini dolar - move WIN ponto a ponto"},
-    "DI1_FUTURES": {"weight": 0.08, "direction": +1, "corr": 0.70, "category": "Juros/DI",
-                    "tier": 1, "intraday_impact": "CRITICO", "note": "Curva de juros - define carry e fluxo RF"},
-    "ITUB4":       {"weight": 0.06, "direction": +1, "corr": 0.82, "category": "Bancos",
-                    "tier": 1, "intraday_impact": "ALTO", "note": "Itau - maior banco, peso IBOV"},
-    "BBDC4":       {"weight": 0.05, "direction": +1, "corr": 0.80, "category": "Bancos",
-                    "tier": 1, "intraday_impact": "ALTO", "note": "Bradesco - sensibilidade juros"},
-    "BBAS3":       {"weight": 0.04, "direction": +1, "corr": 0.78, "category": "Bancos",
-                    "tier": 1, "intraday_impact": "ALTO", "note": "Banco do Brasil - banco publico"},
-    "VALE3":       {"weight": 0.06, "direction": +1, "corr": 0.75, "category": "Mineracao",
-                    "tier": 1, "intraday_impact": "ALTO", "note": "Vale B3 - peso pesado IBOV, commodity"},
-    "PETR4":       {"weight": 0.05, "direction": +1, "corr": 0.72, "category": "Energia",
-                    "tier": 1, "intraday_impact": "ALTO", "note": "Petrobras B3 - preco + politica"},
-    "IFNC":        {"weight": 0.03, "direction": +1, "corr": 0.70, "category": "Setorial BR",
-                    "tier": 1, "intraday_impact": "MEDIO", "note": "Financeiro - sinal setor bancario"},
-    "IMAT":        {"weight": 0.03, "direction": +1, "corr": 0.65, "category": "Setorial BR",
-                    "tier": 1, "intraday_impact": "MEDIO", "note": "Material - sinal commodity BR"},
-    "ICON":        {"weight": 0.03, "direction": +1, "corr": 0.65, "category": "Setorial BR",
-                    "tier": 1, "intraday_impact": "MEDIO", "note": "Consumo - solar demanda interna"},
+    # ---- TIER 1: B3 DIRETOS (58%) - Validados com dados reais ----
+    "ITUB4":       {"weight": 0.14, "direction": +1, "corr_intraday": 0.717, "corr_daily": 0.884,
+                    "r2_intraday": 0.513, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "CRITICO",
+                    "note": "Itau - MAIOR correlacao com WIN (R2=51.3%). Testado 4762 candles 5min"},
+    "BBDC4":       {"weight": 0.12, "direction": +1, "corr_intraday": 0.685, "corr_daily": 0.852,
+                    "r2_intraday": 0.469, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "CRITICO",
+                    "note": "Bradesco - 2o maior banco, R2=46.9%. Sensivel a juros"},
+    "WDO":         {"weight": 0.10, "direction": -1, "corr_intraday": -0.403, "corr_daily": -0.035,
+                    "r2_intraday": 0.162, "category": "Dolar/B3",
+                    "tier": 1, "intraday_impact": "CRITICO",
+                    "note": "Mini dolar - INVERSAMENTE correlacionado (-0.403 intraday). MT5 real-time > YF"},
+    "VALE3":       {"weight": 0.08, "direction": +1, "corr_intraday": 0.584, "corr_daily": 0.579,
+                    "r2_intraday": 0.341, "category": "Mineracao",
+                    "tier": 1, "intraday_impact": "ALTO",
+                    "note": "Vale B3 - R2=34.1%. Consistente dia/intraday"},
+    "BBAS3":       {"weight": 0.06, "direction": +1, "corr_intraday": 0.559, "corr_daily": 0.794,
+                    "r2_intraday": 0.313, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "ALTO",
+                    "note": "Banco do Brasil - R2=31.3%. Mais fraco intraday que diario"},
+    "EWZ":         {"weight": 0.05, "direction": +1, "corr_intraday": 0.558, "corr_daily": 0.940,
+                    "r2_intraday": 0.311, "category": "Fluxo Estrangeiro",
+                    "tier": 1, "intraday_impact": "ALTO",
+                    "note": "ETF Brasil - fluxo gringo. Lag1=+0.066 (lidera!)"},
+    "IFNC":        {"weight": 0.02, "direction": +1, "corr_intraday": None, "corr_daily": None,
+                    "r2_intraday": None, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO",
+                    "note": "Financeiro - sem dados YF 5min. Estimado por bancoes"},
+    "IMAT":        {"weight": 0.01, "direction": +1, "corr_intraday": None, "corr_daily": None,
+                    "r2_intraday": None, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO",
+                    "note": "Material - sem dados YF 5min. Peso conservador"},
+    "ICON":        {"weight": 0.01, "direction": +1, "corr_intraday": None, "corr_daily": None,
+                    "r2_intraday": None, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO",
+                    "note": "Consumo - sem dados YF 5min. Peso conservador"},
 
-    # ---- TIER 2: CONTEXTO GLOBAL (30%) - Define o tom do dia ----
-    "EWZ":         {"weight": 0.06, "direction": +1, "corr": 0.96, "category": "Fluxo Estrangeiro",
-                    "tier": 2, "intraday_impact": "ALTO", "note": "ETF Brasil - fluxo gringo real-time"},
-    "ES_FUTURES":  {"weight": 0.05, "direction": +1, "corr": 0.57, "category": "Indices Globais",
-                    "tier": 2, "intraday_impact": "ALTO", "note": "S&P futures - contexto US intraday"},
-    "VIX":         {"weight": 0.05, "direction": -1, "corr": -0.63, "category": "Volatilidade",
-                    "tier": 2, "intraday_impact": "MEDIO", "note": "Medo global - risco on/off"},
-    "DXY":         {"weight": 0.05, "direction": -1, "corr": -0.57, "category": "Moedas",
-                    "tier": 2, "intraday_impact": "MEDIO", "note": "Dolar index - forca USD"},
-    "IMAB11":      {"weight": 0.04, "direction": +1, "corr": 0.56, "category": "Juros/DI",
-                    "tier": 2, "intraday_impact": "MEDIO", "note": "IMA-B proxy DI - curva BR"},
-    "SP500":       {"weight": 0.03, "direction": +1, "corr": 0.45, "category": "Indices Globais",
-                    "tier": 2, "intraday_impact": "MEDIO", "note": "S&P cash - confirma abertura"},
-    "EUROSTOXX50": {"weight": 0.02, "direction": +1, "corr": 0.53, "category": "Indices Globais",
-                    "tier": 2, "intraday_impact": "BAIXO", "note": "Europa - contexto pre-market"},
+    # ---- TIER 2: CONTEXTO GLOBAL (27%) - Corr 0.25-0.40 intraday ----
+    "ES_FUTURES":  {"weight": 0.06, "direction": +1, "corr_intraday": 0.370, "corr_daily": 0.397,
+                    "r2_intraday": 0.137, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "ALTO",
+                    "note": "S&P futures - R2=13.7%. Contexto US intraday, lag1=+0.021 lidera"},
+    "DXY":         {"weight": 0.05, "direction": -1, "corr_intraday": -0.330, "corr_daily": -0.458,
+                    "r2_intraday": 0.109, "category": "Moedas",
+                    "tier": 2, "intraday_impact": "MEDIO",
+                    "note": "Dolar index - inverso R2=10.9%. Forca USD = pressao WIN"},
+    "VIX":         {"weight": 0.04, "direction": -1, "corr_intraday": -0.303, "corr_daily": -0.424,
+                    "r2_intraday": 0.092, "category": "Volatilidade",
+                    "tier": 2, "intraday_impact": "MEDIO",
+                    "note": "Medo global - inverso R2=9.2%. Risco on/off"},
+    "SP500":       {"weight": 0.04, "direction": +1, "corr_intraday": 0.324, "corr_daily": 0.436,
+                    "r2_intraday": 0.105, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "MEDIO",
+                    "note": "S&P cash - R2=10.5%. Confirma abertura US"},
+    "VALE_ADR":    {"weight": 0.04, "direction": +1, "corr_intraday": 0.377, "corr_daily": 0.703,
+                    "r2_intraday": 0.142, "category": "ADRs/Overnight",
+                    "tier": 2, "intraday_impact": "MEDIO",
+                    "note": "Vale ADR - R2=14.2%. Gap overnight + lag1=+0.033 lidera"},
+    "DAX":         {"weight": 0.02, "direction": +1, "corr_intraday": 0.306, "corr_daily": 0.372,
+                    "r2_intraday": 0.094, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "BAIXO",
+                    "note": "Alemanha - R2=9.4%. Sessao europeia, pre-market BR"},
+    "EUROSTOXX50": {"weight": 0.02, "direction": +1, "corr_intraday": None, "corr_daily": 0.428,
+                    "r2_intraday": None, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "BAIXO",
+                    "note": "Europa - corr diario 0.428. Pre-market contexto"},
 
-    # ---- TIER 3: COMPLEMENTAR (15%) - Confirmacao secundaria ----
-    "DAX":         {"weight": 0.02, "direction": +1, "corr": 0.49, "category": "Indices Globais",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Alemanha - contexto Europa"},
-    "US10Y":       {"weight": 0.02, "direction": -1, "corr": -0.48, "category": "Juros/DI",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Tesouro 10y - custo capital global"},
-    "VALE_ADR":    {"weight": 0.02, "direction": +1, "corr": 0.75, "category": "ADRs/Overnight",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Vale ADR - gap overnight"},
-    "COPPER":      {"weight": 0.02, "direction": +1, "corr": 0.44, "category": "Commodities",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Cobre - pulso China/commodity"},
-    "WTI":         {"weight": 0.02, "direction": -1, "corr": -0.50, "category": "Commodities",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Petroleo - impacto PETR"},
-    "PETR_ADR":    {"weight": 0.01, "direction": +1, "corr": 0.22, "category": "ADRs/Overnight",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Petrobras ADR - gap"},
-    "BRENT":       {"weight": 0.01, "direction": -1, "corr": -0.30, "category": "Commodities",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Brent - referencia Europa"},
-    "IRON_ORE":    {"weight": 0.01, "direction": +1, "corr": 0.20, "category": "Commodities",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Ferro - pulso Vale"},
-    "BITCOIN":     {"weight": 0.01, "direction": +1, "corr": 0.41, "category": "Risk Appetite",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "BTC - risco global"},
-    "NIKKEI":      {"weight": 0.01, "direction": +1, "corr": 0.35, "category": "Indices Globais",
-                    "tier": 3, "intraday_impact": "BAIXO", "note": "Japao - sessao asia"},
+    # ---- TIER 3: MACRO VIES (15%) - Impacto diario, nao intraday ----
+    "DI1_FUTURES": {"weight": 0.05, "direction": +1, "corr_intraday": 0.061, "corr_daily": 0.460,
+                    "r2_intraday": 0.004, "category": "Juros/DI",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "DI - R2=0.4% intraday, 21.2% diario! Move em DIAS nao minutos. Vies macro"},
+    "IMAB11":      {"weight": 0.03, "direction": +1, "corr_intraday": 0.061, "corr_daily": 0.460,
+                    "r2_intraday": 0.004, "category": "Juros/DI",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "IMA-B proxy DI - R2=0.4% intraday. Curva de juros = vies diario"},
+    "PETR4":       {"weight": 0.03, "direction": +1, "corr_intraday": 0.008, "corr_daily": 0.242,
+                    "r2_intraday": 0.000, "category": "Energia",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "PETR4 - ZERO intraday (R2=0.000)! Petroleo+politica descolam. Peso IBOV mecanico"},
+    "PETR_ADR":    {"weight": 0.01, "direction": +1, "corr_intraday": 0.284, "corr_daily": 0.400,
+                    "r2_intraday": 0.081, "category": "ADRs/Overnight",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "Petrobras ADR - R2=8.1%. Gap overnight, direcao petroleo"},
+    "US10Y":       {"weight": 0.01, "direction": -1, "corr_intraday": -0.227, "corr_daily": -0.283,
+                    "r2_intraday": 0.051, "category": "Juros/DI",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "US10Y - R2=5.1%. Custo capital global, vies macro"},
+    "COPPER":      {"weight": 0.01, "direction": +1, "corr_intraday": 0.266, "corr_daily": 0.292,
+                    "r2_intraday": 0.071, "category": "Commodities",
+                    "tier": 3, "intraday_impact": "BAIXO",
+                    "note": "Cobre - R2=7.1%. Pulso China/commodity, confirma VALE"},
+
+    # ---- REMOVIDOS (v8.0) - Correlacao irrelevante com WIN ----
+    # BITCOIN:   corr intraday 0.244, R2=6% - irrelevante
+    # NIKKEI:    corr intraday ~0.100, R2=1% - sessao Asia sem impacto
+    # US2Y:      corr intraday 0.008, R2=0% - zero absoluto
+    # BRENT:     corr intraday -0.204, R2=4% - WTI ja cobre petroleo
+    # IRON_ORE:  corr diario 0.209, sem 5min - fraco, VALE3 ja cobre
+    # GOLD:      corr intraday 0.287, R2=8% - marginal, nao move WIN
+    # WTI:       corr intraday -0.241, R2=6% - marginal, PETR_ADR cobre
+    # NASDAQ:    corr intraday 0.278, R2=8% - ES_FUTURES ja cobre
+    # BOVA11:    corr 0.994 - CIRCULAR, e o proprio indice
+    # SMALL11:   sem dados YF
 }
 
 # ============================================================
@@ -328,7 +367,7 @@ SIGNAL_CONFIG = {
 }
 
 # ============================================================
-# CATEGORIAS PARA O DASHBOARD (v7.0 - DAY TRADE)
+# CATEGORIAS PARA O DASHBOARD (v8.0 - DADOS REAIS)
 # ============================================================
 CATEGORIES = {
     "Dolar/B3": {
@@ -344,12 +383,12 @@ CATEGORIES = {
     "Mineracao": {
         "icon": "MIN",
         "color": "#FF9800",
-        "assets": ["VALE3", "VALE_ADR", "IRON_ORE"]
+        "assets": ["VALE3", "VALE_ADR"]
     },
     "Energia": {
         "icon": "ENR",
         "color": "#4CAF50",
-        "assets": ["PETR4", "PETR_ADR", "WTI", "BRENT"]
+        "assets": ["PETR4", "PETR_ADR"]
     },
     "Setorial BR": {
         "icon": "SET",
@@ -379,23 +418,19 @@ CATEGORIES = {
     "Indices Globais": {
         "icon": "GLO",
         "color": "#2196F3",
-        "assets": ["ES_FUTURES", "SP500", "EUROSTOXX50", "DAX", "NIKKEI"]
+        "assets": ["ES_FUTURES", "SP500", "EUROSTOXX50", "DAX"]
     },
     "Commodities": {
         "icon": "COM",
         "color": "#FF9800",
-        "assets": ["IRON_ORE", "BRENT", "WTI", "COPPER"]
+        "assets": ["COPPER"]
     },
     "ADRs": {
         "icon": "ADR",
         "color": "#00BCD4",
         "assets": ["VALE_ADR", "PETR_ADR"]
     },
-    "Risk": {
-        "icon": "RSK",
-        "color": "#E91E63",
-        "assets": ["BITCOIN"]
-    },
+
 }
 
 # ============================================================

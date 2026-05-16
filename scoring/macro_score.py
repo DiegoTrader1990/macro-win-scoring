@@ -64,7 +64,7 @@ class MacroScorer:
         # Ativos com maior volatilidade precisam de thresholds maiores
         # Usamos 2% como referência para ativos de alta volatilidade
         # e 0.5% para baixa volatilidade
-        corr = abs(weight_config.get("corr", 0.5))
+        corr = abs(weight_config.get("corr_intraday") or weight_config.get("corr", 0.5))
         
         # Thresholds adaptativos baseados na correlação
         # Ativos com correlação forte → threshold menor (mais sensível)
@@ -133,7 +133,7 @@ class MacroScorer:
                 "weight": weight,
                 "contribution": round(contribution, 4),
                 "direction": weight_config.get("direction", 1),
-                "correlation": weight_config.get("corr", 0),
+                "correlation": weight_config.get("corr_intraday") or weight_config.get("corr", 0),
                 "category": category,
                 "change_pct": asset_data.get("change_pct"),
                 "current_price": asset_data.get("current_price"),
