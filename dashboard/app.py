@@ -9,6 +9,7 @@ CompressionDetector, ConfidenceScore, CalendarEvents.
 v6.2: Fixed method name mismatches, DI1=F proxy, auto-refresh fix.
 v6.3: Windows compatibility - safe formatting, global error handling,
       no meta-refresh, None-safe dict access.
+v6.4: Fixed critical NoneType bug in _safe_import + config unpacking.
 
 Para rodar: streamlit run dashboard/app.py
 """
@@ -39,18 +40,26 @@ logger = logging.getLogger(__name__)
 _import_errors = []
 
 def _safe_import(module_path, names, fallback_values=None):
-    """Safely import names from a module, providing fallbacks on failure."""
+    """Safely import names from a module, providing fallbacks on failure.
+
+    v6.4: Only stores non-None values in result dict, so downstream
+    .get(key, default) calls work correctly even when import fails.
+    """
     result = {}
     fb = fallback_values or {}
     try:
         mod = __import__(module_path, fromlist=names)
         for name in names:
-            result[name] = getattr(mod, name, fb.get(name, None))
+            val = getattr(mod, name, fb.get(name))
+            if val is not None:
+                result[name] = val
     except Exception as e:
         _import_errors.append(f"{module_path}: {e}")
         logger.error(f"Import error from {module_path}: {e}")
         for name in names:
-            result[name] = fb.get(name, None)
+            val = fb.get(name)
+            if val is not None:
+                result[name] = val
     return result
 
 # Config imports
@@ -68,17 +77,9 @@ _cfg = _safe_import('config', [
 ])
 
 # Unpack config values with safe defaults
-MT5_CONFIG = _cfg.get('MT5_CONFIG', {})
-DUAL_SOURCE_ASSETS = _cfg.get('DUAL_SOURCE_ASSETS', {})
-YF_SYMBOLS = _cfg.get('YF_SYMBOLS', {})
-MACRO_WEIGHTS = _cfg.get('MACRO_WEIGHTS', {})
-SIGNAL_CONFIG = _cfg.get('SIGNAL_CONFIG', {})
-CATEGORIES = _cfg.get('CATEGORIES', {})
-DASHBOARD_CONFIG = _cfg.get('DASHBOARD_CONFIG', {})
-LOG_CONFIG = _cfg.get('LOG_CONFIG', {})
-WIN_TRACKING = _cfg.get('WIN_TRACKING', {})
-DIVERGENCE_CONFIG = _cfg.get('DIVERGENCE_CONFIG', {})
-UI_CONFIG = _cfg.get('UI_CONFIG', {
+# v6.4: Uses 'or' operator instead of .get(key, default) to handle
+# cases where _safe_import stored None (key exists with None value).
+_UI_DEFAULTS = {
     "panel_width": 580, "panel_padding": 6,
     "font_family_data": "'Consolas', monospace",
     "font_family_ui": "'Segoe UI', sans-serif",
@@ -92,22 +93,34 @@ UI_CONFIG = _cfg.get('UI_CONFIG', {
     "warning": "#FFD600", "neutral": "#78909C",
     "level_resistance": "#FF5252", "level_support": "#69F0AE",
     "level_pivot": "#FFD740", "level_current": "#FFFFFF",
-})
-KEY_LEVELS_CONFIG = _cfg.get('KEY_LEVELS_CONFIG', {})
-SCORE_SMOOTHER_CONFIG = _cfg.get('SCORE_SMOOTHER_CONFIG', {})
-PRICE_REVERSAL_CONFIG = _cfg.get('PRICE_REVERSAL_CONFIG', {})
-ALERT_CONFIG = _cfg.get('ALERT_CONFIG', {})
-SIGNAL_FILTER_CONFIG = _cfg.get('SIGNAL_FILTER_CONFIG', {})
-PERFORMANCE_CONFIG = _cfg.get('PERFORMANCE_CONFIG', {})
-REGIME_CONFIG = _cfg.get('REGIME_CONFIG', {})
-WIN_CONTRACT_CONFIG = _cfg.get('WIN_CONTRACT_CONFIG', {})
-MT5_SYMBOLS = _cfg.get('MT5_SYMBOLS', {})
-CONTEXT_CLASSIFIER_CONFIG = _cfg.get('CONTEXT_CLASSIFIER_CONFIG', {})
-STRUCTURAL_CONTEXT_CONFIG = _cfg.get('STRUCTURAL_CONTEXT_CONFIG', {})
-DYNAMIC_WEIGHTS_CONFIG = _cfg.get('DYNAMIC_WEIGHTS_CONFIG', {})
-COMPRESSION_DETECTOR_CONFIG = _cfg.get('COMPRESSION_DETECTOR_CONFIG', {})
-CONFIDENCE_SCORE_CONFIG = _cfg.get('CONFIDENCE_SCORE_CONFIG', {})
-CALENDAR_EVENTS_CONFIG = _cfg.get('CALENDAR_EVENTS_CONFIG', {})
+}
+
+MT5_CONFIG = _cfg.get('MT5_CONFIG') or {}
+DUAL_SOURCE_ASSETS = _cfg.get('DUAL_SOURCE_ASSETS') or {}
+YF_SYMBOLS = _cfg.get('YF_SYMBOLS') or {}
+MACRO_WEIGHTS = _cfg.get('MACRO_WEIGHTS') or {}
+SIGNAL_CONFIG = _cfg.get('SIGNAL_CONFIG') or {}
+CATEGORIES = _cfg.get('CATEGORIES') or {}
+DASHBOARD_CONFIG = _cfg.get('DASHBOARD_CONFIG') or {}
+LOG_CONFIG = _cfg.get('LOG_CONFIG') or {}
+WIN_TRACKING = _cfg.get('WIN_TRACKING') or {}
+DIVERGENCE_CONFIG = _cfg.get('DIVERGENCE_CONFIG') or {}
+UI_CONFIG = _cfg.get('UI_CONFIG') or _UI_DEFAULTS
+KEY_LEVELS_CONFIG = _cfg.get('KEY_LEVELS_CONFIG') or {}
+SCORE_SMOOTHER_CONFIG = _cfg.get('SCORE_SMOOTHER_CONFIG') or {}
+PRICE_REVERSAL_CONFIG = _cfg.get('PRICE_REVERSAL_CONFIG') or {}
+ALERT_CONFIG = _cfg.get('ALERT_CONFIG') or {}
+SIGNAL_FILTER_CONFIG = _cfg.get('SIGNAL_FILTER_CONFIG') or {}
+PERFORMANCE_CONFIG = _cfg.get('PERFORMANCE_CONFIG') or {}
+REGIME_CONFIG = _cfg.get('REGIME_CONFIG') or {}
+WIN_CONTRACT_CONFIG = _cfg.get('WIN_CONTRACT_CONFIG') or {}
+MT5_SYMBOLS = _cfg.get('MT5_SYMBOLS') or {}
+CONTEXT_CLASSIFIER_CONFIG = _cfg.get('CONTEXT_CLASSIFIER_CONFIG') or {}
+STRUCTURAL_CONTEXT_CONFIG = _cfg.get('STRUCTURAL_CONTEXT_CONFIG') or {}
+DYNAMIC_WEIGHTS_CONFIG = _cfg.get('DYNAMIC_WEIGHTS_CONFIG') or {}
+COMPRESSION_DETECTOR_CONFIG = _cfg.get('COMPRESSION_DETECTOR_CONFIG') or {}
+CONFIDENCE_SCORE_CONFIG = _cfg.get('CONFIDENCE_SCORE_CONFIG') or {}
+CALENDAR_EVENTS_CONFIG = _cfg.get('CALENDAR_EVENTS_CONFIG') or {}
 
 # Data sources
 _dm = _safe_import('data_sources.data_manager', ['DataManager'])
@@ -193,7 +206,8 @@ if DeltaAnalyzer is None: CRITICAL_FAILURES.append("DeltaAnalyzer (scoring.delta
 if CRITICAL_FAILURES:
     logger.error(f"CRITICAL import failures: {CRITICAL_FAILURES}")
 
-UI = UI_CONFIG
+# v6.4: Triple-safe UI assignment - guaranteed to always be a valid dict
+UI = UI_CONFIG if isinstance(UI_CONFIG, dict) else _UI_DEFAULTS
 
 st.set_page_config(page_title="Macro WIN v6", page_icon="W", layout="centered",
                    initial_sidebar_state="collapsed")
