@@ -3,8 +3,8 @@ Configuracao do Sistema de Macro Scoring para Mini Indice (WIN)
 ================================================================
 Todos os ativos, pesos, thresholds e parametros configuraveis.
 Pesos baseados nas correlacoes validadas com dados reais (60 dias).
-v5.0 - Score Smoother, Price Reversal, Regime Detector, Signal Manager,
-       Performance Tracker, Alert System, Dynamic Contract Detection
+v6.0 - Context Classifier, Structural Context, Dynamic Weights,
+       Compression Detector, Confidence Score, Calendar Events
 """
 
 # ============================================================
@@ -506,4 +506,61 @@ BACKTEST_CONFIG = {
     "position_size": 1,
     "stop_loss_points": 200,
     "take_profit_points": 400,
+}
+
+# ============================================================
+# CONFIGURACAO DO CONTEXT CLASSIFIER (v6.0)
+# ============================================================
+CONTEXT_CLASSIFIER_CONFIG = {
+    "enabled": True,
+    "min_periods": 5,
+}
+
+# ============================================================
+# CONFIGURACAO DO STRUCTURAL CONTEXT - VWAP/IB/VA (v6.0)
+# ============================================================
+STRUCTURAL_CONTEXT_CONFIG = {
+    "enabled": True,
+    "vwap_period": "session",
+    "ib_start_hour": 9,
+    "ib_end_hour": 10,
+    "va_lookback_days": 5,
+}
+
+# ============================================================
+# CONFIGURACAO DO DYNAMIC WEIGHTS (v6.0)
+# ============================================================
+DYNAMIC_WEIGHTS_CONFIG = {
+    "enabled": True,
+    "lookback_periods": 78,
+    "recalc_interval_seconds": 900,
+    "max_weight_change_pct": 20,
+    "min_correlation_threshold": 0.3,
+}
+
+# ============================================================
+# CONFIGURACAO DO COMPRESSION DETECTOR (v6.0)
+# ============================================================
+COMPRESSION_DETECTOR_CONFIG = {
+    "enabled": True,
+    "atr_lookback": 20,
+    "atr_percentile_low": 20,
+    "score_variance_window": 15,
+    "sector_convergence_threshold": 0.7,
+}
+
+# ============================================================
+# CONFIGURACAO DO CONFIDENCE SCORE (v6.0)
+# ============================================================
+CONFIDENCE_SCORE_CONFIG = {
+    "enabled": True,
+    "min_data_quality": 0.6,
+}
+
+# ============================================================
+# CONFIGURACAO DO CALENDAR EVENTS (v6.0)
+# ============================================================
+CALENDAR_EVENTS_CONFIG = {
+    "enabled": True,
+    "events": [],
 }
