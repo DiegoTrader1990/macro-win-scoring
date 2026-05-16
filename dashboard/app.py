@@ -1,12 +1,12 @@
 """
-Dashboard Profissional - Macro Scoring WIN v10.0
+Dashboard Profissional - Macro Scoring WIN v10.2
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
-v10.0: Curva DI Visual + Confluencia 7 Gatilhos + Market Phase + Flow + Sparkline
+v10.2: Timeout + fallback individual + partial data + no st.stop + bulletproof init
 v9.0: IFNC/IMAT/ICON validados + Curva DI completa + 7 gatilhos
 v6.3: Windows compatibility - safe formatting, global error handling,
       no meta-refresh, None-safe dict access.
@@ -266,7 +266,7 @@ if CRITICAL_FAILURES:
 # v6.4: Triple-safe UI assignment - guaranteed to always be a valid dict
 UI = UI_CONFIG if isinstance(UI_CONFIG, dict) else _UI_DEFAULTS
 
-st.set_page_config(page_title="Macro WIN v10", page_icon="W", layout="centered",
+st.set_page_config(page_title="Macro WIN v10.2", page_icon="W", layout="centered",
                    initial_sidebar_state="collapsed")
 
 # ============ SAFE FORMAT HELPER (v6.3) ============
@@ -517,14 +517,16 @@ def resolve_wdo_contract():
 
 # ============ INIT ============
 def init_session_state():
-    # v10.1: Verificacao robusta - garante que TODOS os atributos existem
+    # v10.2: Verificacao robusta - garante que TODOS os atributos existem
     # mesmo se houver falha parcial na inicializacao
-    needs_init = "data_manager" not in st.session_state
+    # Checa multiplos atributos criticos para detectar init incompleto
+    _critical_keys = ["data_manager", "scorer", "score_result", "refresh_count"]
+    needs_init = any(k not in st.session_state for k in _critical_keys)
     
-    # Se ja inicializado, verifica integridade
+    # Se data_manager existe mas e None e DataManager class esta disponivel, tenta reinit
     if not needs_init:
-        if st.session_state.data_manager is None:
-            needs_init = True  # DataManager morreu, precisa reiniciar
+        if st.session_state.get("data_manager") is None and DataManager is not None:
+            needs_init = True  # DataManager morreu mas pode ser recriado
     
     if needs_init:
         # Check critical modules
@@ -960,10 +962,10 @@ def refresh_data():
         if len(st.session_state.signal_log) > 50:
             st.session_state.signal_log = st.session_state.signal_log[-50:]
 
-    st.session_state.refresh_count += 1
+    st.session_state["refresh_count"] = st.session_state.get("refresh_count", 0) + 1
     st.session_state.last_refresh = now
 
-    if st.session_state.refresh_count % 2 == 0 or not st.session_state.sectors_data:
+    if st.session_state.get("refresh_count", 0) % 2 == 0 or not st.session_state.get("sectors_data"):
         try:
             sm2 = st.session_state.get("sector_manager")
             if sm2:
@@ -1025,8 +1027,10 @@ with tab_mesa:
             if not st.button("Tentar mesmo assim (modo limitado)"):
                 st.stop()
 
-        # v8.0: Robust loading with timeout and progress
-        if not st.session_state.get("score_result"):
+        # v10.2: Robust loading with timeout, partial data support, and auto-retry
+        _needs_refresh = not st.session_state.get("score_result") or not st.session_state.get("last_data")
+        
+        if _needs_refresh:
             import threading
             import time as _time
             
@@ -1036,63 +1040,101 @@ with tab_mesa:
             status_text.text("Conectando ao Yahoo Finance...")
             progress_bar.progress(20)
             
-            # Run refresh with timeout (30 seconds max)
+            # Run refresh with timeout (45 seconds max for v10.2 - batch + individual fallback)
             _refresh_error = [None]
             _refresh_done = [False]
+            _refresh_partial = [False]
             
             def _do_refresh():
                 try:
-                    refresh_data()
+                    result = refresh_data()
                     _refresh_done[0] = True
+                    sr = st.session_state.get("score_result", {})
+                    if sr and sr.get("assets_available", 0) > 0:
+                        _refresh_partial[0] = True
                 except Exception as e:
                     _refresh_error[0] = str(e)
+                    sr = st.session_state.get("score_result", {})
+                    if sr and sr.get("assets_available", 0) > 0:
+                        _refresh_partial[0] = True
             
             _refresh_thread = threading.Thread(target=_do_refresh, daemon=True)
             _refresh_thread.start()
             
-            # Wait with progress updates
+            # Wait with progress updates (45s timeout for v10.2)
             _waited = 0
-            while _refresh_thread.is_alive() and _waited < 30:
+            while _refresh_thread.is_alive() and _waited < 45:
                 _time.sleep(0.5)
                 _waited += 0.5
-                pct = min(20 + int(_waited / 30 * 70), 90)
+                pct = min(20 + int(_waited / 45 * 70), 90)
                 progress_bar.progress(pct)
-                if _waited > 5:
-                    status_text.text(f"Baixando dados... ({_waited:.0f}s)")
+                if _waited > 10:
+                    status_text.text(f"Baixando dados (fallback individual)... ({_waited:.0f}s)")
+                elif _waited > 5:
+                    status_text.text(f"Buscando cotacoes... ({_waited:.0f}s)")
                 elif _waited > 2:
-                    status_text.text("Buscando cotações...")
+                    status_text.text("Buscando cotacoes...")
             
             progress_bar.progress(95)
             status_text.text("Calculando score...")
             
-            if _refresh_error[0]:
+            # v10.2: NUNCA faz st.stop() - sempre tenta mostrar algo
+            if _refresh_error[0] and not _refresh_partial[0]:
                 progress_bar.empty()
                 status_text.empty()
                 st.error(f"Erro ao buscar dados: {_refresh_error[0]}")
-                st.info("Verifique sua conexao com internet e tente novamente.")
-                if st.button("Tentar novamente"):
+                st.info("O sistema tentara novamente automaticamente. Clique abaixo para tentar agora.")
+                if st.button("Tentar novamente", key="retry_error"):
                     st.session_state.score_result = {}
+                    st.session_state.last_data = {}
+                    if "data_manager" in st.session_state:
+                        st.session_state.data_manager = None
                     st.rerun()
-                st.stop()
+                # v10.2: NAO faz st.stop() - mostra diagnostico
+                dm = st.session_state.get("data_manager")
+                if dm:
+                    try:
+                        diag = dm.get_diagnostic()
+                        with st.expander("Diagnostico da conexao"):
+                            st.json(diag)
+                    except Exception:
+                        pass
+                # Mostra interface minima com score 0
+                st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "SEM DADOS", "confidence": "---", "action": "Aguardando conexao..."}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
             
-            if not _refresh_done[0]:
+            elif not _refresh_done[0] and _refresh_partial[0]:
                 progress_bar.empty()
                 status_text.empty()
-                st.warning("Timeout: dados demoraram mais de 30s. Usando dados parciais.")
+                st.warning("Timeout: dados parciais obtidos. Interface limitada.")
             
-            progress_bar.progress(100)
-            _time.sleep(0.3)
-            progress_bar.empty()
-            status_text.empty()
+            elif not _refresh_done[0]:
+                progress_bar.empty()
+                status_text.empty()
+                st.warning("Timeout: dados demoraram mais de 45s. Tentando novamente...")
+                st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "TIMEOUT", "confidence": "---", "action": "Reconectando..."}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
+            
+            else:
+                progress_bar.progress(100)
+                _time.sleep(0.3)
+                progress_bar.empty()
+                status_text.empty()
 
         sr = st.session_state.get("score_result", {})
-        if not sr:
-            st.error("Sem dados. Verifique conexao com internet.")
-            st.info("Possiveis causas: internet lenta, Yahoo Finance offline, ou firewall bloqueando.")
-            if st.button("Tentar novamente"):
-                st.session_state.score_result = {}
-                st.rerun()
-            st.stop()
+        # v10.2: NUNCA faz st.stop() - sempre mostra a interface
+        if not sr or (sr.get("assets_available", 0) == 0 and sr.get("score", 0) == 0):
+            if not sr:
+                st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "AGUARDANDO", "confidence": "---", "action": "Sem dados no momento"}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
+                sr = st.session_state.score_result
+            
+            _data_count = len(st.session_state.get("last_data", {}))
+            if _data_count == 0:
+                st.markdown("""<div style="background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-size:9px;color:#FF8A80;text-align:center">SEM DADOS - Verifique conexao com internet<br><span style="font-size:7px;color:#6b7d8e">Possiveis causas: internet lenta, Yahoo Finance offline, ou firewall bloqueando</span></div>""", unsafe_allow_html=True)
+                if st.button("Tentar novamente", key="retry_nodata"):
+                    st.session_state.score_result = {}
+                    st.session_state.last_data = {}
+                    if "data_manager" in st.session_state:
+                        st.session_state.data_manager = None
+                    st.rerun()
 
         score = sr.get("score", 0) or 0
         signal = sr.get("signal", {})
@@ -1141,7 +1183,7 @@ with tab_mesa:
 
         # ==== 1. STATUS BAR ====
         wc = st.session_state.get("win_change")
-        wp = st.session_state.win_price
+        wp = st.session_state.get("win_price")
         ws = sf(wp, ",.0f", "---")
         wcc = sf(wc, "+.2f", "---") + "%" if wc is not None else "---"
         dxy = ad.get("DXY", {})
