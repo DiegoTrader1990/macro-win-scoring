@@ -19,14 +19,37 @@ from datetime import datetime
 
 # CRITICAL: Resolve project root BEFORE any other imports
 # This must work regardless of where streamlit is launched from
+# v6.4: Multiple path strategies for maximum Windows compatibility
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_APP_DIR)
+
+# Strategy 1: Parent of dashboard directory
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-# Also add current working directory
-if os.getcwd() not in sys.path:
-    sys.path.insert(0, os.getcwd())
+# Strategy 2: Current working directory (streamlit runs from project root)
+_cwd = os.getcwd()
+if _cwd not in sys.path:
+    sys.path.insert(0, _cwd)
+
+# Strategy 3: Also add the dashboard dir itself for relative imports
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
+
+# Strategy 4: Walk up from __file__ to find config.py
+_walk_dir = _APP_DIR
+for _ in range(3):
+    if os.path.isfile(os.path.join(_walk_dir, 'config.py')):
+        if _walk_dir not in sys.path:
+            sys.path.insert(0, _walk_dir)
+        break
+    _walk_dir = os.path.dirname(_walk_dir)
+
+# Log the paths for debugging
+logger.info(f"App dir: {_APP_DIR}")
+logger.info(f"Project root: {_PROJECT_ROOT}")
+logger.info(f"CWD: {_cwd}")
+logger.info(f"Config found: {os.path.isfile(os.path.join(_PROJECT_ROOT, 'config.py'))}")
 
 import streamlit as st
 import logging
