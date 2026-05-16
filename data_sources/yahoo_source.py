@@ -1,8 +1,11 @@
 """
 Fonte de Dados: Yahoo Finance
 ================================
-Busca dados de ativos internacionais e macro que não estão no MT5.
-Fallback para ativos B3 quando MT5 não está disponível.
+Busca dados de ativos internacionais e macro que nao estao no MT5.
+Fallback para ativos B3 quando MT5 nao esta disponivel.
+v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
+      apenas 1 candle com period="5d". Agora usa estrategia progressiva:
+      5d -> 1mo -> fast_info.previous_close -> info.previousClose
 """
 
 import logging
@@ -18,7 +21,7 @@ try:
     logger.info("yfinance package encontrado")
 except ImportError:
     YF_AVAILABLE = False
-    logger.warning("yfinance NÃO encontrado. Instale com: pip install yfinance")
+    logger.warning("yfinance NAO encontrado. Instale com: pip install yfinance")
 
 
 class YahooFinanceSource:
@@ -30,25 +33,16 @@ class YahooFinanceSource:
         self.cache_duration = 30  # segundos
     
     def is_available(self) -> bool:
-        """Verifica se Yahoo Finance está disponível."""
+        """Verifica se Yahoo Finance esta disponivel."""
         return YF_AVAILABLE
     
     def get_current_price(self, symbol: str) -> Optional[float]:
-        """
-        Obtém preço atual de um ativo via Yahoo Finance.
-        
-        Args:
-            symbol: Ticker no Yahoo Finance (ex: "^GSPC", "DX-Y.NYB")
-        
-        Returns:
-            Preço atual ou None
-        """
+        """Obtem preco atual de um ativo via Yahoo Finance."""
         if not YF_AVAILABLE:
             return None
         
         try:
             ticker = yf.Ticker(symbol)
-            # Usa fast_info para preço atual (mais rápido)
             try:
                 price = ticker.fast_info.last_price
                 if price and price > 0:
@@ -56,7 +50,6 @@ class YahooFinanceSource:
             except:
                 pass
             
-            # Fallback: busca histórico recente
             hist = ticker.history(period="1d")
             if hist is not None and not hist.empty:
                 return float(hist['Close'].iloc[-1])
@@ -64,26 +57,17 @@ class YahooFinanceSource:
             return None
             
         except Exception as e:
-            logger.debug(f"YF: Erro ao buscar preço de '{symbol}': {e}")
+            logger.debug(f"YF: Erro ao buscar preco de '{symbol}': {e}")
             return None
     
     def get_previous_close(self, symbol: str) -> Optional[float]:
-        """
-        Obtém o fechamento anterior via Yahoo Finance.
-        
-        Args:
-            symbol: Ticker no Yahoo Finance
-        
-        Returns:
-            Preço de fechamento anterior ou None
-        """
+        """Obtem o fechamento anterior via Yahoo Finance."""
         if not YF_AVAILABLE:
             return None
         
         try:
             ticker = yf.Ticker(symbol)
             
-            # Tenta fast_info primeiro
             try:
                 prev = ticker.fast_info.previous_close
                 if prev and prev > 0:
@@ -91,7 +75,6 @@ class YahooFinanceSource:
             except:
                 pass
             
-            # Fallback: histórico de 5 dias
             hist = ticker.history(period="5d")
             if hist is not None and len(hist) >= 2:
                 return float(hist['Close'].iloc[-2])
@@ -103,16 +86,7 @@ class YahooFinanceSource:
             return None
     
     def get_daily_candles(self, symbol: str, days: int = 30) -> Optional[list]:
-        """
-        Obtém candles diários via Yahoo Finance.
-        
-        Args:
-            symbol: Ticker no Yahoo Finance
-            days: Número de dias
-        
-        Returns:
-            Lista de dicts com dados OHLCV ou None
-        """
+        """Obtem candles diarios via Yahoo Finance."""
         if not YF_AVAILABLE:
             return None
         
@@ -141,27 +115,52 @@ class YahooFinanceSource:
     
     def get_asset_data(self, symbol: str) -> Optional[dict]:
         """
-        Obtém dados completos de um ativo via Yahoo Finance.
-        
-        Args:
-            symbol: Ticker no Yahoo Finance
-        
-        Returns:
-            Dict com preço atual, variação, etc.
+        Obtem dados completos de um ativo via Yahoo Finance.
+        v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
+        apenas 1 candle com period="5d". Agora tenta:
+        1. Historico progressivo (5d -> 1mo)
+        2. fast_info.previous_close (para ETFs com historico limitado)
+        3. info.previousClose (ultimo recurso)
         """
         if not YF_AVAILABLE:
             return None
         
         try:
             ticker = yf.Ticker(symbol)
+            prev_close = None
+            current_price = None
             
-            # Busca histórico de 5 dias (mais confiável que fast_info)
-            hist = ticker.history(period="5d")
+            # Estrategia 1: Historico progressivo (5d -> 1mo)
+            for period in ["5d", "1mo"]:
+                hist = ticker.history(period=period)
+                if hist is not None and not hist.empty:
+                    current_price = float(hist['Close'].iloc[-1])
+                    if len(hist) >= 2:
+                        prev_close = float(hist['Close'].iloc[-2])
+                        break
+                    # Se so tem 1 candle, tenta proximo periodo
+                    continue
             
-            if hist is None or hist.empty:
+            # Estrategia 2: fast_info para previous_close (ETFs com historico curto)
+            if prev_close is None and current_price is not None:
+                try:
+                    fi_prev = ticker.fast_info.previous_close
+                    if fi_prev and fi_prev > 0:
+                        prev_close = float(fi_prev)
+                except Exception:
+                    pass
+            
+            # Estrategia 3: Tenta .info para previousClose
+            if prev_close is None and current_price is not None:
+                try:
+                    info = ticker.info
+                    if info and info.get('previousClose'):
+                        prev_close = float(info['previousClose'])
+                except Exception:
+                    pass
+            
+            if current_price is None:
                 return None
-            
-            current_price = float(hist['Close'].iloc[-1])
             
             result = {
                 "source": "yahoo_finance",
@@ -170,8 +169,7 @@ class YahooFinanceSource:
                 "timestamp": datetime.now(),
             }
             
-            if len(hist) >= 2:
-                prev_close = float(hist['Close'].iloc[-2])
+            if prev_close is not None and prev_close > 0:
                 result["previous_close"] = prev_close
                 result["change_pct"] = ((current_price - prev_close) / prev_close) * 100
                 result["change_points"] = current_price - prev_close
@@ -187,15 +185,7 @@ class YahooFinanceSource:
             return None
     
     def get_multi_asset_data(self, symbols: dict) -> Dict[str, dict]:
-        """
-        Busca dados de múltiplos ativos de forma eficiente.
-        
-        Args:
-            symbols: Dict {nome_interno: ticker_yf}
-        
-        Returns:
-            Dict {nome_interno: dados_do_ativo}
-        """
+        """Busca dados de multiplos ativos de forma eficiente."""
         results = {}
         
         for name, yf_symbol in symbols.items():
@@ -211,20 +201,14 @@ class YahooFinanceSource:
 
 
 class YahooFinanceBatch:
-    """Busca em lote para múltiplos ativos (mais eficiente)."""
+    """Busca em lote para multiplos ativos (mais eficiente)."""
     
     @staticmethod
-    def download_batch(symbols: dict, period: str = "5d") -> Dict[str, dict]:
+    def download_batch(symbols: dict, period: str = "1mo") -> Dict[str, dict]:
         """
-        Usa yf.download para buscar múltiplos ativos de uma vez.
-        v8.0: Handles new yfinance MultiIndex columns format + timeout.
-        
-        Args:
-            symbols: Dict {nome_interno: ticker_yf}
-            period: Período (ex: "5d", "1mo")
-        
-        Returns:
-            Dict {nome_interno: dados_do_ativo}
+        Usa yf.download para buscar multiplos ativos de uma vez.
+        v9.1: Periodo padrao alterado para "1mo" para ETFs brasileiros.
+        Handles new yfinance MultiIndex columns format + timeout.
         """
         if not YF_AVAILABLE:
             return {}
@@ -251,31 +235,25 @@ class YahooFinanceBatch:
             results = {}
             for name, yf_symbol in symbols.items():
                 try:
-                    # Get Close column for this ticker
                     close_series = None
                     
                     if is_multiindex:
-                        # New yfinance: columns are (Price, Ticker) or (Ticker, Price)
-                        # Try (Close, ticker) format
                         try:
                             close_series = data[('Close', yf_symbol)].dropna()
                         except (KeyError, TypeError):
                             try:
                                 close_series = data[(yf_symbol, 'Close')].dropna()
                             except (KeyError, TypeError):
-                                # Try filtering
                                 close_cols = [c for c in data.columns if c[0] == 'Close' and yf_symbol in str(c)]
                                 if close_cols:
                                     close_series = data[close_cols[0]].dropna()
                     elif is_multi_ticker:
-                        # Old format: data[ticker]['Close']
                         try:
                             ticker_data = data[yf_symbol]
                             close_series = ticker_data['Close'].dropna()
                         except (KeyError, TypeError):
                             pass
                     else:
-                        # Single ticker: data['Close']
                         try:
                             close_series = data['Close'].dropna()
                         except (KeyError, TypeError):
@@ -300,9 +278,22 @@ class YahooFinanceBatch:
                         result["change_pct"] = ((current_price - prev_close) / prev_close) * 100
                         result["change_points"] = current_price - prev_close
                     else:
-                        result["previous_close"] = None
-                        result["change_pct"] = None
-                        result["change_points"] = None
+                        # v9.1: Para ETFs com 1 candle, tenta fast_info
+                        try:
+                            t = yf.Ticker(yf_symbol)
+                            fi_prev = t.fast_info.previous_close
+                            if fi_prev and fi_prev > 0:
+                                result["previous_close"] = float(fi_prev)
+                                result["change_pct"] = ((current_price - float(fi_prev)) / float(fi_prev)) * 100
+                                result["change_points"] = current_price - float(fi_prev)
+                            else:
+                                result["previous_close"] = None
+                                result["change_pct"] = None
+                                result["change_points"] = None
+                        except Exception:
+                            result["previous_close"] = None
+                            result["change_pct"] = None
+                            result["change_points"] = None
                     
                     results[name] = result
                     

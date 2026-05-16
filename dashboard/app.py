@@ -1,13 +1,13 @@
 """
-Dashboard Profissional - Macro Scoring WIN v9.0
+Dashboard Profissional - Macro Scoring WIN v10.0
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
+v10.0: Curva DI Visual + Confluencia 7 Gatilhos + Market Phase + Flow + Sparkline
 v9.0: IFNC/IMAT/ICON validados + Curva DI completa + 7 gatilhos
-v6.2: Fixed method name mismatches, DI1=F proxy, auto-refresh fix.
 v6.3: Windows compatibility - safe formatting, global error handling,
       no meta-refresh, None-safe dict access.
 v6.4: Fixed critical NoneType bug in _safe_import + config unpacking.
@@ -266,7 +266,7 @@ if CRITICAL_FAILURES:
 # v6.4: Triple-safe UI assignment - guaranteed to always be a valid dict
 UI = UI_CONFIG if isinstance(UI_CONFIG, dict) else _UI_DEFAULTS
 
-st.set_page_config(page_title="Macro WIN v6", page_icon="W", layout="centered",
+st.set_page_config(page_title="Macro WIN v10", page_icon="W", layout="centered",
                    initial_sidebar_state="collapsed")
 
 # ============ SAFE FORMAT HELPER (v6.3) ============
@@ -421,6 +421,50 @@ st.markdown(f"""
     .err-display{{background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-family:{UI['font_family_data']};font-size:9px;color:#FF8A80}}
     .err-display .err-title{{font-weight:800;font-size:10px;color:#FF5252;margin-bottom:4px}}
     .err-display .err-trace{{font-size:7px;color:#FF8A80;white-space:pre-wrap;word-break:break-all}}
+
+    /* v10.0: CURVA DI VISUAL */
+    .dicurve{{display:flex;align-items:flex-end;gap:2px;padding:3px 4px;background:{UI['bg_secondary']};border-bottom:1px solid {UI['border_color']};height:38px}}
+    .dibar{{display:flex;flex-direction:column;align-items:center;flex:1;gap:0}}
+    .dibar-fill{{width:100%;border-radius:1px 1px 0 0;min-height:2px;transition:height 0.3s}}
+    .dibar-label{{font-size:5px;color:{UI['text_muted']};font-family:{UI['font_family_data']};letter-spacing:.5px}}
+    .dibar-val{{font-size:6px;font-weight:700;font-family:{UI['font_family_data']};margin-top:1px}}
+    .di-spread{{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:50px;gap:1px}}
+    .di-spread-label{{font-size:5px;color:{UI['text_muted']};text-transform:uppercase;letter-spacing:.5px}}
+    .di-spread-val{{font-size:9px;font-weight:900;font-family:{UI['font_family_data']}}}
+    .di-spread-shape{{font-size:5px;font-weight:700;letter-spacing:.5px}}
+
+    /* v10.0: CONFLUENCIA TRIGGERS */
+    .trig-grid{{display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:1px}}
+    .trig-item{{display:flex;align-items:center;gap:3px;padding:2px 3px;background:{UI['bg_sector']};border:1px solid {UI['border_color']};border-radius:1px;font-size:6px;font-family:{UI['font_family_data']}}}
+    .trig-dot{{width:5px;height:5px;border-radius:50%;min-width:5px}}
+    .trig-name{{color:{UI['text_secondary']};flex:1;font-size:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .trig-strength{{font-weight:800;font-size:7px;min-width:12px;text-align:right}}
+    .trig-dir{{font-size:5px;font-weight:700;min-width:20px;text-align:right}}
+    .trig-score-bar{{display:flex;align-items:center;gap:4px;padding:3px 4px;background:{UI['bg_secondary']};border-bottom:1px solid {UI['border_color']}}}
+    .trig-pips{{display:flex;gap:1px}}
+    .trig-pip{{width:6px;height:6px;border-radius:1px;background:{UI['border_color']}}}
+    .trig-pip.on{{background:{UI['positive']}}}
+    .trig-pip.blocked{{background:{UI['negative']}}}
+
+    /* v10.0: MARKET PHASE */
+    .mktphase{{display:flex;background:{UI['bg_secondary']};border-bottom:1px solid {UI['border_color']};font-family:{UI['font_family_data']};font-size:7px}}
+    .phase-item{{flex:1;text-align:center;padding:2px 0;border-right:1px solid {UI['border_color']};opacity:0.3}}
+    .phase-item.active{{opacity:1.0;font-weight:800}}
+    .phase-item:last-child{{border-right:none}}
+    .phase-label{{font-size:5px;color:{UI['text_muted']};text-transform:uppercase;letter-spacing:.5px}}
+    .phase-time{{font-size:7px;font-weight:700}}
+
+    /* v10.0: FLOW DIRECTION */
+    .flowbar{{display:flex;align-items:center;gap:4px;padding:2px 4px;background:{UI['bg_secondary']};border-bottom:1px solid {UI['border_color']};font-size:7px}}
+    .flow-icon{{font-size:9px}}
+    .flow-label{{color:{UI['text_muted']};font-size:5px;text-transform:uppercase;letter-spacing:.5px}}
+    .flow-val{{font-weight:900;font-family:{UI['font_family_data']};font-size:8px}}
+    .flow-bar{{flex:1;height:4px;background:{UI['border_color']};border-radius:2px;position:relative;overflow:hidden}}
+    .flow-fill{{position:absolute;top:0;height:100%;border-radius:2px;transition:width 0.3s}}
+
+    /* v10.0: SPARKLINE */
+    .sparkline{{display:flex;align-items:flex-end;gap:0;height:16px;min-width:80px}}
+    .spark-bar{{width:3px;min-height:1px;border-radius:0.5px}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1070,6 +1114,68 @@ with tab_mesa:
         </div>
         """, unsafe_allow_html=True)
 
+        # ==== 1b. MARKET PHASE (v10.0) ====
+        now_brt = datetime.now()
+        hour = now_brt.hour
+        minute = now_brt.minute
+        time_val = hour + minute / 60.0
+
+        phases = [
+            ("PRE", "09:00", 9.0, 10.0, "#FF9800"),
+            ("ABERT", "10:00", 10.0, 10.5, "#4CAF50"),
+            ("CORE", "10:30", 10.5, 16.0, "#2196F3"),
+            ("CLOSING", "16:00", 16.0, 17.5, "#FF5722"),
+        ]
+        phase_html = ""
+        for pname, ptime, pstart, pend, pcolor in phases:
+            is_active = pstart <= time_val < pend
+            active_cls = "active" if is_active else ""
+            pcolor_style = f"color:{pcolor}" if is_active else ""
+            phase_html += f'<div class="phase-item {active_cls}" style="{pcolor_style}"><div class="phase-label">{pname}</div><div class="phase-time" style="{pcolor_style}">{ptime}</div></div>'
+        st.markdown(f'<div class="mktphase">{phase_html}</div>', unsafe_allow_html=True)
+
+        # ==== 1c. FLOW DIRECTION (v10.0) ====
+        # Fluxo estrangeiro: EWZ + DXY + ADR gaps
+        ewz_chg = ewz.get('change_pct') if ewz else None
+        dxy_chg = dxy.get('change_pct') if dxy else None
+        vale_adr = ad.get('VALE_ADR', {})
+        pbr_adr = ad.get('PETR_ADR', {})
+        vale3 = ad.get('VALE3', {})
+        pbr_chg_adr = pbr_adr.get('change_pct') if pbr_adr else None
+        vale_adr_chg = vale_adr.get('change_pct') if vale_adr else None
+        vale3_chg = vale3.get('change_pct') if vale3 else None
+
+        flow_score = 0
+        flow_parts = 0
+        if ewz_chg is not None:
+            flow_score += 1 if ewz_chg > 0 else -1
+            flow_parts += 1
+        if dxy_chg is not None:
+            flow_score += -1 if dxy_chg > 0 else 1  # DXY up = flow out
+            flow_parts += 1
+        if vale_adr_chg is not None and vale3_chg is not None:
+            # ADR outperforming local = foreign buying
+            gap = vale_adr_chg - vale3_chg
+            flow_score += 1 if gap > 0.3 else -1 if gap < -0.3 else 0
+            flow_parts += 1
+
+        flow_dir = "IN" if flow_score > 0 else "OUT" if flow_score < 0 else "NEUTRO"
+        flow_color = UI['positive'] if flow_score > 0 else UI['negative'] if flow_score < 0 else UI['neutral']
+        flow_pct = min(100, max(0, 50 + (flow_score / max(flow_parts, 1)) * 50))
+        flow_fill_pct = flow_pct if flow_score >= 0 else 100 - flow_pct
+        flow_left = "0" if flow_score >= 0 else f"{flow_pct:.0f}%"
+
+        st.markdown(f"""
+        <div class="flowbar">
+            <span class="flow-label">FLOW</span>
+            <span class="flow-val" style="color:{flow_color}">{flow_dir}</span>
+            <div class="flow-bar">
+                <div class="flow-fill" style="background:{flow_color};width:{flow_fill_pct:.0f}%;left:{flow_left}"></div>
+            </div>
+            <span class="flow-label">EWZ {sfd(ewz, 'change_pct', '+.1f', '---')}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
         # ==== 2. SCORE ROW ====
         dtxt = "COMPRA" if score > 0 else "VENDA" if score < 0 else "NEUTRO"
         dbg = f"{UI['positive']}22" if score > 0 else f"{UI['negative']}22" if score < 0 else f"{UI['neutral']}22"
@@ -1294,6 +1400,155 @@ with tab_mesa:
         else:
             st.markdown(f'<div style="padding:2px;color:{UI["text_muted"]};font-size:7px;text-align:center">Carregando setores...</div>', unsafe_allow_html=True)
 
+        # ==== 5b. CURVA DI VISUAL (v10.0) ====
+        di_curto = ad.get("DI_CURTO", {})
+        di_medio = ad.get("DI_MEDIO", {})
+        di_longo = ad.get("DI_LONGO", {})
+        di_curto_chg = di_curto.get("change_pct")
+        di_medio_chg = di_medio.get("change_pct")
+        di_longo_chg = di_longo.get("change_pct")
+
+        if di_curto_chg is not None or di_longo_chg is not None:
+            # Curva DI visual com barras proporcionais
+            max_abs = max(abs(di_curto_chg or 0), abs(di_medio_chg or 0), abs(di_longo_chg or 0), 1.0)
+            di_data = [
+                ("CURTO", di_curto_chg, "#E040FB"),
+                ("MEDIO", di_medio_chg, "#AB47BC"),
+                ("LONGO", di_longo_chg, "#7B1FA2"),
+            ]
+
+            # Spread = longo - curto
+            spread = (di_longo_chg or 0) - (di_curto_chg or 0)
+            if spread >= 0.3:
+                shape = "STEEP"
+                shape_color = UI['negative']
+            elif spread <= -0.2:
+                shape = "FLAT"
+                shape_color = UI['warning']
+            elif di_curto_chg is not None and di_longo_chg is not None and di_curto_chg > di_longo_chg and di_curto_chg > 0:
+                shape = "INV"
+                shape_color = UI['negative']
+            else:
+                shape = "NEUTRO"
+                shape_color = UI['neutral']
+
+            di_bars_html = ""
+            for label, chg, color in di_data:
+                if chg is not None:
+                    bar_h = max(4, min(28, abs(chg) / max_abs * 28))
+                    bar_color = color if chg >= 0 else UI['negative']
+                    val_str = f"{chg:+.2f}%"
+                else:
+                    bar_h = 2
+                    bar_color = UI['text_muted']
+                    val_str = "---"
+                di_bars_html += f"""
+                <div class="dibar">
+                    <div class="dibar-fill" style="background:{bar_color};height:{bar_h}px"></div>
+                    <div class="dibar-val" style="color:{bar_color}">{val_str}</div>
+                    <div class="dibar-label">{label}</div>
+                </div>"""
+
+            st.markdown(f"""
+            <div class="sech">CURVA DI <span class="secr">curto / medio / longo</span></div>
+            <div class="dicurve">
+                {di_bars_html}
+                <div class="di-spread">
+                    <div class="di-spread-label">SPREAD</div>
+                    <div class="di-spread-val" style="color:{shape_color}">{sf(spread, '+.2f', '---')}</div>
+                    <div class="di-spread-shape" style="color:{shape_color}">{shape}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ==== 5c. CONFLUENCIA TRIGGERS (v10.0) ====
+        if trigger_result:
+            trig_fired = trigger_result.get("triggered", False)
+            trig_score = trigger_result.get("trigger_score", 0) or 0
+            trig_direction = trigger_result.get("direction", "NEUTRO")
+            trig_blocks_list = trigger_result.get("blocks", [])
+            trig_details = trigger_result.get("details", {})
+
+            # Pips (7 gatilhos)
+            pips_html = ""
+            for i in range(7):
+                if i < len(trig_blocks_list):
+                    pips_html += '<div class="trig-pip blocked"></div>'
+                elif i < trig_score:
+                    pips_html += '<div class="trig-pip on"></div>'
+                else:
+                    pips_html += '<div class="trig-pip"></div>'
+
+            trig_score_color = UI['positive'] if trig_score >= 4 else UI['warning'] if trig_score >= 2 else UI['neutral']
+            if trig_blocks_list:
+                trig_score_color = UI['negative']
+
+            # Trigger detail grid
+            trig_names_map = {
+                "score_delta": ("Sc+Delta", "ScD"),
+                "dolar_bank": ("DOL+Bancos", "D+B"),
+                "di_curve": ("Curva DI", "DI"),
+                "compression_break": ("Compressao", "Cmp"),
+                "tier1_alignment": ("Tier1 Align", "T1"),
+                "sector_divergence": ("Setor Div", "Set"),
+                "regime_filter": ("Regime", "Rgm"),
+            }
+
+            trig_items_html = ""
+            for trig_key, (full_name, short_name) in trig_names_map.items():
+                td = trig_details.get(trig_key, {})
+                if trig_key == "regime_filter":
+                    is_active = td.get("blocked", False)
+                    tdir = "BLOCK" if is_active else "OK"
+                    tstr = str(len(td.get("block_reasons", [])))
+                    dot_color = UI['negative'] if is_active else UI['positive']
+                    dir_color = UI['negative'] if is_active else UI['text_muted']
+                else:
+                    is_active = td.get("triggered", False)
+                    tdir = td.get("direction", "---")[:4]
+                    tstr = str(td.get("strength", 0))
+                    dot_color = UI['positive'] if is_active else UI['border_color']
+                    dir_color = UI['positive'] if tdir in ("LONG",) else UI['negative'] if tdir in ("SHOR",) else UI['text_muted']
+
+                trig_items_html += f"""
+                <div class="trig-item">
+                    <div class="trig-dot" style="background:{dot_color}"></div>
+                    <span class="trig-name">{short_name}</span>
+                    <span class="trig-dir" style="color:{dir_color}">{tdir}</span>
+                    <span class="trig-strength" style="color:{dot_color}">{tstr}</span>
+                </div>"""
+
+            st.markdown(f"""
+            <div class="sech">CONFLUENCIA <span class="secr">7 gatilhos</span></div>
+            <div class="trig-score-bar">
+                <span style="font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">GATILHOS</span>
+                <div class="trig-pips">{pips_html}</div>
+                <span style="font-size:11px;font-weight:900;color:{trig_score_color};font-family:{UI['font_family_data']}">{trig_score}/7</span>
+                <span style="font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">{trig_direction}</span>
+            </div>
+            <div class="trig-grid">{trig_items_html}</div>
+            """, unsafe_allow_html=True)
+
+        # ==== 5d. SCORE SPARKLINE (v10.0) ====
+        sh_hist = st.session_state.score_history
+        if len(sh_hist) >= 5:
+            spark_scores = [h["score"] for h in sh_hist[-20:]]
+            spark_max = max(abs(s) for s in spark_scores) if spark_scores else 1
+            spark_max = max(spark_max, 1)
+            spark_bars = ""
+            for s in spark_scores[-20:]:
+                h_px = max(1, int(abs(s) / spark_max * 14))
+                col = UI['positive'] if s > 0 else UI['negative'] if s < 0 else UI['neutral']
+                spark_bars += f'<div class="spark-bar" style="height:{h_px}px;background:{col}"></div>'
+
+            st.markdown(f"""
+            <div style="display:flex;align-items:center;gap:4px;padding:2px 4px;background:{UI['bg_secondary']};border-bottom:1px solid {UI['border_color']}">
+                <span style="font-size:5px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">HIST</span>
+                <div class="sparkline">{spark_bars}</div>
+                <span style="font-size:5px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">{len(sh_hist)}pts</span>
+            </div>
+            """, unsafe_allow_html=True)
+
         # ==== 6. DIVERGENCIA ====
         dt_div = div.get("type", "INDEFINIDO") if div else "INDEFINIDO"
         if dt_div not in ("INDEFINIDO", "NEUTRO"):
@@ -1417,7 +1672,7 @@ with tab_mesa:
         # The meta tag conflicts with Streamlit's state management on Windows
         st.markdown(f"""
         <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-            AUTO-REFRESH {interval}s | v9.0 | IFNC+ICON+IMAT | Curva DI | 7 Triggers
+            AUTO-REFRESH {interval}s | v10.0 | Curva DI | Confluencia | Flow | Phase
         </div>
         """, unsafe_allow_html=True)
         st.markdown(f"""<script>
