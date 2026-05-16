@@ -97,6 +97,7 @@ _cfg = _safe_import('config', [
     'CONTEXT_CLASSIFIER_CONFIG', 'STRUCTURAL_CONTEXT_CONFIG',
     'DYNAMIC_WEIGHTS_CONFIG', 'COMPRESSION_DETECTOR_CONFIG',
     'CONFIDENCE_SCORE_CONFIG', 'CALENDAR_EVENTS_CONFIG',
+    'ENTRY_TRIGGERS_CONFIG', 'ENHANCED_LOG_CONFIG', 'CORRELATION_VALIDATOR_CONFIG',
 ])
 
 # v6.4: Fallback direct import if _safe_import failed
@@ -169,6 +170,9 @@ CONFIDENCE_SCORE_CONFIG = _cfg.get('CONFIDENCE_SCORE_CONFIG') or {}
 CALENDAR_EVENTS_CONFIG = _cfg.get('CALENDAR_EVENTS_CONFIG') or {}
 SECTOR_GROUPS = _cfg.get('SECTOR_GROUPS') or {}
 MULTI_TIMEFRAME_CONFIG = _cfg.get('MULTI_TIMEFRAME_CONFIG') or {}
+ENTRY_TRIGGERS_CONFIG = _cfg.get('ENTRY_TRIGGERS_CONFIG') or {}
+ENHANCED_LOG_CONFIG = _cfg.get('ENHANCED_LOG_CONFIG') or {}
+CORRELATION_VALIDATOR_CONFIG = _cfg.get('CORRELATION_VALIDATOR_CONFIG') or {}
 
 # Data sources
 _dm = _safe_import('data_sources.data_manager', ['DataManager'])
@@ -220,6 +224,10 @@ CompressionDetector = _cd.get('CompressionDetector')
 
 _cs = _safe_import('scoring.confidence_score', ['ConfidenceScore'])
 ConfidenceScore = _cs.get('ConfidenceScore')
+
+# v7.0: Entry Triggers
+_et = _safe_import('scoring.entry_triggers', ['EntryTriggers'])
+EntryTriggers = _et.get('EntryTriggers')
 
 # Utils
 _al = _safe_import('utils.alert_system', ['AlertSystem'])
@@ -506,6 +514,9 @@ def init_session_state():
             st.session_state.confidence_score = ConfidenceScore(CONFIDENCE_SCORE_CONFIG) if ConfidenceScore else None
             st.session_state.calendar_events = CalendarEvents(CALENDAR_EVENTS_CONFIG) if CalendarEvents else None
 
+            # v7.0: Entry Triggers
+            st.session_state.entry_triggers = EntryTriggers(ENTRY_TRIGGERS_CONFIG) if EntryTriggers else None
+
             # State
             st.session_state.score_history = []
             st.session_state.signal_log = []
@@ -536,6 +547,9 @@ def init_session_state():
             st.session_state.dynamic_weights_result = {}
             st.session_state.compression_result = {}
             st.session_state.confidence_result = {}
+
+            # v7.0: Entry triggers cache
+            st.session_state.trigger_result = {}
             st.session_state.calendar_result = {}
 
             st.session_state.active_win_contract = resolve_win_contract() or "---"
@@ -805,6 +819,22 @@ def refresh_data():
                 st.session_state.alert_html = ""
         except Exception as e:
             logger.warning(f"AlertSystem error: {e}")
+
+    # v7.0: Entry Triggers Evaluation
+    et = st.session_state.get("entry_triggers")
+    if et:
+        try:
+            trigger_result = et.evaluate(
+                score=score, delta=delta_val, all_data=all_data,
+                compression_result=compression_result,
+                regime_result=regime_result,
+                divergence_result=divergence_result,
+                confidence_result=confidence_result,
+                category_scores=category_scores,
+            )
+            st.session_state.trigger_result = trigger_result
+        except Exception as e:
+            logger.warning(f"EntryTriggers error: {e}")
 
     # History
     now = datetime.now()

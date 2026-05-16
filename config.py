@@ -2,9 +2,12 @@
 Configuracao do Sistema de Macro Scoring para Mini Indice (WIN)
 ================================================================
 Todos os ativos, pesos, thresholds e parametros configuraveis.
-Pesos baseados nas correlacoes validadas com dados reais (60 dias).
-v6.0 - Context Classifier, Structural Context, Dynamic Weights,
-       Compression Detector, Confidence Score, Calendar Events
+v7.0 - Reestruturacao completa dos pesos para DAY TRADE:
+       - B3 diretos (DOL, DI, bancões, VALE3, PETR4, setoriais) com peso MAIOR
+       - Internacionais/ADRs com peso MENOR (contexto, nao gatilho)
+       - Sistema de gatilhos de entrada com confluencia
+       - Logging completo para auditoria diaria
+       - Script de validacao empirica de correlacoes
 """
 
 # ============================================================
@@ -216,31 +219,87 @@ WIN_TRACKING = {
 }
 
 # ============================================================
-# PESOS DO SCORING MACRO (v5.0 - com DI1_FUTURES)
+# PESOS DO SCORING MACRO (v7.0 - DAY TRADE INTRADAY)
 # Total = 1.00
 # ============================================================
+# FILOSOFIA v7.0:
+#   TIER 1 - B3 DIRETOS (55%): Ativos que movem o WIN no MESMO segundo
+#     DOL/WDO: Inversamente correlacionado, move ponto a ponto
+#     DI/Curva de Juros: Define custo de carry, fluxo de renda fixa
+#     Bancões: 40% do IBOV, movem o indice junto
+#     VALE3/PETR4: Pesos pesados do IBOV
+#     Setoriais (IFNC/IMAT/ICON): Sinal setorial em tempo real
+#
+#   TIER 2 - CONTEXTO GLOBAL (30%): Cenário macro que define o tom
+#     EWZ: Fluxo estrangeiro real-time
+#     ES/S&P: Contexto US, pre-market e overnight
+#     VIX: Medo global
+#     DXY: Forca do dolar
+#     Indices globais: DAX, EuroStoxx
+#
+#   TIER 3 - COMPLEMENTAR (15%): Confirmação secundária
+#     ADRs, commodities, crypto, juros US
+# ============================================================
 MACRO_WEIGHTS = {
-    "EWZ":         {"weight": 0.10, "direction": +1, "corr": 0.96, "category": "Fluxo Estrangeiro"},
-    "VALE_ADR":    {"weight": 0.09, "direction": +1, "corr": 0.75, "category": "ADRs/Overnight"},
-    "VIX":         {"weight": 0.08, "direction": -1, "corr": -0.63, "category": "Volatilidade"},
-    "DXY":         {"weight": 0.08, "direction": -1, "corr": -0.57, "category": "Moedas"},
-    "ES_FUTURES":  {"weight": 0.07, "direction": +1, "corr": 0.57, "category": "Indices Globais"},
-    "EUROSTOXX50": {"weight": 0.06, "direction": +1, "corr": 0.53, "category": "Indices Globais"},
-    "IMAB11":      {"weight": 0.06, "direction": +1, "corr": 0.56, "category": "Juros/DI"},
-    "DAX":         {"weight": 0.05, "direction": +1, "corr": 0.49, "category": "Indices Globais"},
-    "US10Y":       {"weight": 0.05, "direction": -1, "corr": -0.48, "category": "Juros/DI"},
-    "WDO":         {"weight": 0.05, "direction": -1, "corr": -0.35, "category": "Moedas"},
-    "DI1_FUTURES": {"weight": 0.05, "direction": +1, "corr": 0.56, "category": "Juros/DI"},  # Using IMAB11 as proxy
-    "WTI":         {"weight": 0.04, "direction": -1, "corr": -0.50, "category": "Commodities"},
-    "SP500":       {"weight": 0.04, "direction": +1, "corr": 0.45, "category": "Indices Globais"},
-    "COPPER":      {"weight": 0.04, "direction": +1, "corr": 0.44, "category": "Commodities"},
-    "BITCOIN":     {"weight": 0.03, "direction": +1, "corr": 0.41, "category": "Risk Appetite"},
-    "NIKKEI":      {"weight": 0.03, "direction": +1, "corr": 0.35, "category": "Indices Globais"},
-    "IFNC":        {"weight": 0.03, "direction": +1, "corr": 0.40, "category": "Setorial BR"},
-    "BRENT":       {"weight": 0.02, "direction": -1, "corr": -0.30, "category": "Commodities"},
-    "IMAT":        {"weight": 0.01, "direction": +1, "corr": 0.25, "category": "Setorial BR"},
-    "IRON_ORE":    {"weight": 0.01, "direction": +1, "corr": 0.20, "category": "Commodities"},
-    "PETR_ADR":    {"weight": 0.01, "direction": +1, "corr": 0.22, "category": "ADRs/Overnight"},
+    # ---- TIER 1: B3 DIRETOS (55%) - Movem o WIN em tempo real ----
+    "WDO":         {"weight": 0.12, "direction": -1, "corr": -0.85, "category": "Dolar/B3",
+                    "tier": 1, "intraday_impact": "CRITICO", "note": "Mini dolar - move WIN ponto a ponto"},
+    "DI1_FUTURES": {"weight": 0.08, "direction": +1, "corr": 0.70, "category": "Juros/DI",
+                    "tier": 1, "intraday_impact": "CRITICO", "note": "Curva de juros - define carry e fluxo RF"},
+    "ITUB4":       {"weight": 0.06, "direction": +1, "corr": 0.82, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "ALTO", "note": "Itau - maior banco, peso IBOV"},
+    "BBDC4":       {"weight": 0.05, "direction": +1, "corr": 0.80, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "ALTO", "note": "Bradesco - sensibilidade juros"},
+    "BBAS3":       {"weight": 0.04, "direction": +1, "corr": 0.78, "category": "Bancos",
+                    "tier": 1, "intraday_impact": "ALTO", "note": "Banco do Brasil - banco publico"},
+    "VALE3":       {"weight": 0.06, "direction": +1, "corr": 0.75, "category": "Mineracao",
+                    "tier": 1, "intraday_impact": "ALTO", "note": "Vale B3 - peso pesado IBOV, commodity"},
+    "PETR4":       {"weight": 0.05, "direction": +1, "corr": 0.72, "category": "Energia",
+                    "tier": 1, "intraday_impact": "ALTO", "note": "Petrobras B3 - preco + politica"},
+    "IFNC":        {"weight": 0.03, "direction": +1, "corr": 0.70, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO", "note": "Financeiro - sinal setor bancario"},
+    "IMAT":        {"weight": 0.03, "direction": +1, "corr": 0.65, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO", "note": "Material - sinal commodity BR"},
+    "ICON":        {"weight": 0.03, "direction": +1, "corr": 0.65, "category": "Setorial BR",
+                    "tier": 1, "intraday_impact": "MEDIO", "note": "Consumo - solar demanda interna"},
+
+    # ---- TIER 2: CONTEXTO GLOBAL (30%) - Define o tom do dia ----
+    "EWZ":         {"weight": 0.06, "direction": +1, "corr": 0.96, "category": "Fluxo Estrangeiro",
+                    "tier": 2, "intraday_impact": "ALTO", "note": "ETF Brasil - fluxo gringo real-time"},
+    "ES_FUTURES":  {"weight": 0.05, "direction": +1, "corr": 0.57, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "ALTO", "note": "S&P futures - contexto US intraday"},
+    "VIX":         {"weight": 0.05, "direction": -1, "corr": -0.63, "category": "Volatilidade",
+                    "tier": 2, "intraday_impact": "MEDIO", "note": "Medo global - risco on/off"},
+    "DXY":         {"weight": 0.05, "direction": -1, "corr": -0.57, "category": "Moedas",
+                    "tier": 2, "intraday_impact": "MEDIO", "note": "Dolar index - forca USD"},
+    "IMAB11":      {"weight": 0.04, "direction": +1, "corr": 0.56, "category": "Juros/DI",
+                    "tier": 2, "intraday_impact": "MEDIO", "note": "IMA-B proxy DI - curva BR"},
+    "SP500":       {"weight": 0.03, "direction": +1, "corr": 0.45, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "MEDIO", "note": "S&P cash - confirma abertura"},
+    "EUROSTOXX50": {"weight": 0.02, "direction": +1, "corr": 0.53, "category": "Indices Globais",
+                    "tier": 2, "intraday_impact": "BAIXO", "note": "Europa - contexto pre-market"},
+
+    # ---- TIER 3: COMPLEMENTAR (15%) - Confirmacao secundaria ----
+    "DAX":         {"weight": 0.02, "direction": +1, "corr": 0.49, "category": "Indices Globais",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Alemanha - contexto Europa"},
+    "US10Y":       {"weight": 0.02, "direction": -1, "corr": -0.48, "category": "Juros/DI",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Tesouro 10y - custo capital global"},
+    "VALE_ADR":    {"weight": 0.02, "direction": +1, "corr": 0.75, "category": "ADRs/Overnight",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Vale ADR - gap overnight"},
+    "COPPER":      {"weight": 0.02, "direction": +1, "corr": 0.44, "category": "Commodities",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Cobre - pulso China/commodity"},
+    "WTI":         {"weight": 0.02, "direction": -1, "corr": -0.50, "category": "Commodities",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Petroleo - impacto PETR"},
+    "PETR_ADR":    {"weight": 0.01, "direction": +1, "corr": 0.22, "category": "ADRs/Overnight",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Petrobras ADR - gap"},
+    "BRENT":       {"weight": 0.01, "direction": -1, "corr": -0.30, "category": "Commodities",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Brent - referencia Europa"},
+    "IRON_ORE":    {"weight": 0.01, "direction": +1, "corr": 0.20, "category": "Commodities",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Ferro - pulso Vale"},
+    "BITCOIN":     {"weight": 0.01, "direction": +1, "corr": 0.41, "category": "Risk Appetite",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "BTC - risco global"},
+    "NIKKEI":      {"weight": 0.01, "direction": +1, "corr": 0.35, "category": "Indices Globais",
+                    "tier": 3, "intraday_impact": "BAIXO", "note": "Japao - sessao asia"},
 }
 
 # ============================================================
@@ -269,13 +328,43 @@ SIGNAL_CONFIG = {
 }
 
 # ============================================================
-# CATEGORIAS PARA O DASHBOARD (scoring)
+# CATEGORIAS PARA O DASHBOARD (v7.0 - DAY TRADE)
 # ============================================================
 CATEGORIES = {
-    "Indices Globais": {
-        "icon": "GLO",
+    "Dolar/B3": {
+        "icon": "DOL",
+        "color": "#00BCD4",
+        "assets": ["WDO", "DXY", "USDBRL"]
+    },
+    "Bancos": {
+        "icon": "BNK",
         "color": "#2196F3",
-        "assets": ["ES_FUTURES", "SP500", "EUROSTOXX50", "DAX", "NIKKEI"]
+        "assets": ["ITUB4", "BBDC4", "BBAS3", "IFNC"]
+    },
+    "Mineracao": {
+        "icon": "MIN",
+        "color": "#FF9800",
+        "assets": ["VALE3", "VALE_ADR", "IRON_ORE"]
+    },
+    "Energia": {
+        "icon": "ENR",
+        "color": "#4CAF50",
+        "assets": ["PETR4", "PETR_ADR", "WTI", "BRENT"]
+    },
+    "Setorial BR": {
+        "icon": "SET",
+        "color": "#8BC34A",
+        "assets": ["IFNC", "IMAT", "ICON"]
+    },
+    "Juros/DI": {
+        "icon": "TX",
+        "color": "#9C27B0",
+        "assets": ["DI1_FUTURES", "IMAB11", "US10Y"]
+    },
+    "Fluxo Estrangeiro": {
+        "icon": "FLX",
+        "color": "#E91E63",
+        "assets": ["EWZ", "ES_FUTURES", "SP500"]
     },
     "Volatilidade": {
         "icon": "VIX",
@@ -284,33 +373,28 @@ CATEGORIES = {
     },
     "Moedas": {
         "icon": "FX",
-        "color": "#4CAF50",
+        "color": "#00BCD4",
         "assets": ["DXY", "WDO", "USDBRL"]
+    },
+    "Indices Globais": {
+        "icon": "GLO",
+        "color": "#2196F3",
+        "assets": ["ES_FUTURES", "SP500", "EUROSTOXX50", "DAX", "NIKKEI"]
     },
     "Commodities": {
         "icon": "COM",
         "color": "#FF9800",
-        "assets": ["IRON_ORE", "BRENT", "WTI", "COPPER", "GOLD"]
-    },
-    "Juros/DI": {
-        "icon": "TX",
-        "color": "#9C27B0",
-        "assets": ["US10Y", "IMAB11", "DI1_FUTURES"]
+        "assets": ["IRON_ORE", "BRENT", "WTI", "COPPER"]
     },
     "ADRs": {
         "icon": "ADR",
         "color": "#00BCD4",
-        "assets": ["VALE_ADR", "PETR_ADR", "EWZ"]
+        "assets": ["VALE_ADR", "PETR_ADR"]
     },
     "Risk": {
         "icon": "RSK",
         "color": "#E91E63",
         "assets": ["BITCOIN"]
-    },
-    "Setorial": {
-        "icon": "SET",
-        "color": "#8BC34A",
-        "assets": ["IFNC", "IMAT", "ICON"]
     },
 }
 
@@ -563,4 +647,126 @@ CONFIDENCE_SCORE_CONFIG = {
 CALENDAR_EVENTS_CONFIG = {
     "enabled": True,
     "events": [],
+}
+
+# ============================================================
+# GATILHOS DE ENTRADA - SISTEMA DE TRIGGERS (v7.0)
+# ============================================================
+# Define condicoes especificas para pontos de entrada
+# Cada gatilho requer confluencia de multiplos fatores
+ENTRY_TRIGGERS_CONFIG = {
+    "enabled": True,
+
+    # Gatilho 1: SCORE + DELTA (viés + aceleração)
+    "score_delta_trigger": {
+        "enabled": True,
+        # Compra: score > 35 E delta > 10 (acelerando alta)
+        "long_score_min": 35,
+        "long_delta_min": 10,
+        # Venda: score < -35 E delta < -10 (acelerando baixa)
+        "short_score_max": -35,
+        "short_delta_max": -10,
+        "description": "Score forte + Delta acelerando = entrada agressiva",
+    },
+
+    # Gatilho 2: DOL vs BANCOS (divergência interna B3)
+    "dolar_bank_trigger": {
+        "enabled": True,
+        # DOL caindo + Bancos subindo = COMPRA forte (risco Brasil ON)
+        "long_wdo_max_change": -0.3,    # WDO caindo = dolar caindo
+        "long_banks_min_change": 0.2,    # Bancos subindo
+        # DOL subindo + Bancos caindo = VENDA forte (risco Brasil OFF)
+        "short_wdo_min_change": 0.3,     # WDO subindo = dolar subindo
+        "short_banks_max_change": -0.2,   # Bancos caindo
+        "bank_assets": ["ITUB4", "BBDC4", "BBAS3", "IFNC"],
+        "description": "DOL vs Bancos - conflito interno B3 = gatilho forte",
+    },
+
+    # Gatilho 3: SCORE REVERSAL + COMPRESSION (saída de compressão)
+    "compression_break_trigger": {
+        "enabled": True,
+        # Score saindo de zona neutra após compressão = breakout
+        "compression_periods_min": 5,     # Pelo menos 5 periodos comprimido
+        "compression_score_range": 15,    # Score variando menos de 15 pts
+        "breakout_delta_min": 8,          # Delta do breakout > 8
+        "description": "Saida de compressao + delta forte = breakout",
+    },
+
+    # Gatilho 4: TIER1 CONFLUENCIA (B3 diretos alinhados)
+    "tier1_alignment_trigger": {
+        "enabled": True,
+        # Pelo menos N ativos Tier1 na mesma direção
+        "min_aligned_assets": 6,          # 6 de 10 Tier1 alinhados
+        "tier1_assets": ["WDO", "DI1_FUTURES", "ITUB4", "BBDC4", "BBAS3",
+                         "VALE3", "PETR4", "IFNC", "IMAT", "ICON"],
+        "aligned_change_threshold": 0.15, # Variação mínima para contar como alinhado
+        "description": "B3 diretos alinhados = movimento coordenado",
+    },
+
+    # Gatilho 5: REGIME + DIVERGENCIA (anti-entrada)
+    "regime_filter_trigger": {
+        "enabled": True,
+        # NÃO entrar se regime lateral + sem direção clara
+        "block_on_lateral": True,         # Bloqueia em regime lateral
+        "block_on_divergence": True,      # Bloqueia se divergência ativa
+        "block_on_low_confidence": True,  # Bloqueia se confiança < 50%
+        "min_confidence_pct": 50,
+        "description": "Filtro anti-entrada: lateral, divergencia, baixa confianca",
+    },
+}
+
+# ============================================================
+# LOG TURBINADO - AUDITORIA DIARIA (v7.0)
+# ============================================================
+# Logs completos para revisão diária e evolução do sistema
+ENHANCED_LOG_CONFIG = {
+    "enabled": True,
+
+    # Log de gatilhos disparados
+    "trigger_log_file": "trigger_log.csv",
+    "enable_trigger_log": True,
+
+    # Log de Tier1 detalhado (B3 diretos a cada ciclo)
+    "tier1_log_file": "tier1_log.csv",
+    "enable_tier1_log": True,
+
+    # Log de confluência (quantos ativos alinhados por direção)
+    "confluence_log_file": "confluence_log.csv",
+    "enable_confluence_log": True,
+
+    # Log de auditoria diária (resumo do dia)
+    "daily_audit_file": "daily_audit.jsonl",
+    "enable_daily_audit": True,
+
+    # Log de ajuste de pesos (quando DynamicWeights recalcula)
+    "weight_adjustment_log": "weight_adjustments.csv",
+    "enable_weight_adjustment_log": True,
+
+    # Snapshot completo a cada N ciclos (para replay)
+    "snapshot_log_file": "snapshot_log.jsonl",
+    "enable_snapshot_log": True,
+    "snapshot_every_n_cycles": 10,  # Snapshot completo a cada 10 ciclos
+
+    # Log de resultado de operações (entrada -> saida)
+    "trade_result_log": "trade_results.csv",
+    "enable_trade_result_log": True,
+
+    # Métricas de evolução do sistema
+    "evolution_metrics_file": "evolution_metrics.csv",
+    "enable_evolution_metrics": True,
+}
+
+# ============================================================
+# VALIDACAO EMPIRICA - CORRELAÇÃO INTRADAY (v7.0)
+# ============================================================
+# Script para testar correlação real de cada ativo com WIN intraday
+CORRELATION_VALIDATOR_CONFIG = {
+    "enabled": True,
+    "lookback_days": 60,          # 60 dias de dados
+    "interval": "5m",             # Candles de 5 min para intraday
+    "min_observations": 500,      # Mínimo de observações
+    "correlation_method": "pearson",
+    "lag_seconds": [0, 30, 60],   # Testar lag de 0s, 30s, 60s
+    "output_file": "correlation_report.json",
+    "recalc_days": 7,             # Recalcular correlações a cada 7 dias
 }
