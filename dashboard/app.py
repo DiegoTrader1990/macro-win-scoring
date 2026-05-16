@@ -6,7 +6,7 @@ Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
-v6.1: Robust error handling, graceful degradation, auto-reload fix.
+v6.2: Fixed method name mismatches, DI1=F proxy, auto-refresh fix.
 
 Para rodar: streamlit run dashboard/app.py
 """
@@ -553,7 +553,7 @@ def refresh_data():
     if pr:
         try:
             if win_price is not None and win_change_pct is not None:
-                pr.update_win_price(win_price, win_change_pct)
+                pr.update_win_data(win_price, win_change_pct)
             pr.update_score(score, delta_val)
             reversal_result = pr.check_price_reversal()
             st.session_state.reversal_result = reversal_result
@@ -1173,11 +1173,16 @@ with tab_mesa:
 
     # ==== 10. AUTO-REFRESH ====
     interval = st.session_state.get("interval", 30)
-    time.sleep(1)
+    try:
+        time.sleep(1)
+    except Exception:
+        pass
+    # Auto-refresh using meta tag instead of time.sleep
     st.markdown(f"""
     <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-        AUTO-REFRESH {interval}s | v6.1 | Context + Structural + Dynamic + Confidence
+        AUTO-REFRESH {interval}s | v6.2 | Context + Structural + Dynamic + Confidence
     </div>
+    <meta http-equiv="refresh" content="{interval}">
     """, unsafe_allow_html=True)
 
 

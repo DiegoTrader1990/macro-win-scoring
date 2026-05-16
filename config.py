@@ -76,7 +76,7 @@ YF_SYMBOLS = {
     "PETR_ADR": "PBR",
     "EWZ": "EWZ",
     "IBOV": "^BVSP",
-    "DI1_FUTURES": "DI1=F",
+    "DI1_FUTURES": "IMAB11.SA",  # DI1=F delisted from YF, using IMA-B as proxy
 }
 
 DUAL_SOURCE_ASSETS = {
@@ -156,7 +156,7 @@ SECTOR_GROUPS = {
             "US10Y": {"yf": "^TNX", "display": "US10Y"},
             "US2Y": {"yf": "^IRX", "display": "US2Y"},
             "IMAB11": {"yf": "IMAB11.SA", "display": "IMA-B"},
-            "DI1_FUTURES": {"yf": "DI1=F", "display": "DI1"},
+            "DI1_FUTURES": {"yf": "IMAB11.SA", "display": "IMA-B"},
         }
     },
     "COMMODITIES": {
@@ -230,7 +230,7 @@ MACRO_WEIGHTS = {
     "DAX":         {"weight": 0.05, "direction": +1, "corr": 0.49, "category": "Indices Globais"},
     "US10Y":       {"weight": 0.05, "direction": -1, "corr": -0.48, "category": "Juros/DI"},
     "WDO":         {"weight": 0.05, "direction": -1, "corr": -0.35, "category": "Moedas"},
-    "DI1_FUTURES": {"weight": 0.05, "direction": -1, "corr": -0.52, "category": "Juros/DI"},
+    "DI1_FUTURES": {"weight": 0.05, "direction": +1, "corr": 0.56, "category": "Juros/DI"},  # Using IMAB11 as proxy
     "WTI":         {"weight": 0.04, "direction": -1, "corr": -0.50, "category": "Commodities"},
     "SP500":       {"weight": 0.04, "direction": +1, "corr": 0.45, "category": "Indices Globais"},
     "COPPER":      {"weight": 0.04, "direction": +1, "corr": 0.44, "category": "Commodities"},
