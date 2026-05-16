@@ -517,12 +517,24 @@ def resolve_wdo_contract():
 
 # ============ INIT ============
 def init_session_state():
-    if "data_manager" not in st.session_state:
+    # v10.1: Verificacao robusta - garante que TODOS os atributos existem
+    # mesmo se houver falha parcial na inicializacao
+    needs_init = "data_manager" not in st.session_state
+    
+    # Se ja inicializado, verifica integridade
+    if not needs_init:
+        if st.session_state.data_manager is None:
+            needs_init = True  # DataManager morreu, precisa reiniciar
+    
+    if needs_init:
         # Check critical modules
         if DataManager is None:
             st.error("ERRO CRITICO: DataManager nao pode ser importado. Verifique a instalacao.")
             st.code(f"Erros de importacao:\n" + "\n".join(_import_errors))
-            st.stop()
+            # v10.1: Nao usa st.stop() - em vez disso, inicializa com dados vazios
+            # para evitar AttributeError em reruns
+            _init_empty_state()
+            return
 
         try:
             wt = dict(WIN_TRACKING) if isinstance(WIN_TRACKING, dict) and WIN_TRACKING else {}
@@ -601,21 +613,67 @@ def init_session_state():
             st.session_state.active_wdo_contract = resolve_wdo_contract() or "---"
 
         except Exception as e:
+            logger.error(f"Erro ao inicializar sistema: {e}\n{traceback.format_exc()}")
             st.error(f"Erro ao inicializar sistema: {e}")
-            st.code(traceback.format_exc())
+            with st.expander("Detalhes do erro"):
+                st.code(traceback.format_exc())
             # Show which config values are missing
             missing = [k for k in ['MT5_CONFIG', 'MACRO_WEIGHTS', 'SECTOR_GROUPS', 'UI_CONFIG'] 
                        if k not in _cfg or _cfg[k] is None]
             if missing:
                 st.warning(f"Config values ausentes: {', '.join(missing)}")
                 st.info("Verifique se o arquivo config.py esta no diretorio raiz do projeto.")
-            st.stop()
+            # v10.1: Inicializa com estado vazio em vez de st.stop()
+            _init_empty_state()
+            return
+
+def _init_empty_state():
+    """v10.1: Inicializa session_state com valores vazios/seguros.
+    Evita AttributeError em reruns quando a inicializacao principal falha."""
+    defaults = {
+        "data_manager": None,
+        "scorer": None, "delta_analyzer": None, "divergence_detector": None,
+        "key_levels": None, "sector_manager": None, "macro_logger": None,
+        "score_smoother": None, "price_reversal": None, "regime_detector": None,
+        "signal_manager": None, "performance_tracker": None, "alert_system": None,
+        "context_classifier": None, "structural_context": None,
+        "dynamic_weights": None, "compression_detector": None,
+        "confidence_score": None, "calendar_events": None,
+        "entry_triggers": None,
+        "score_history": [], "signal_log": [], "last_data": {},
+        "mt5_status": None, "refresh_count": 0, "interval": 30,
+        "win_price": None, "win_change": None, "sectors_data": {},
+        "score_result": {}, "delta_result": {}, "divergence_result": {},
+        "levels_result": {}, "smoothed_result": {}, "reversal_result": {},
+        "regime_result": {}, "filtered_signal": {}, "perf_stats": {},
+        "alert_result": {}, "alert_html": "",
+        "context_result": {}, "structural_result": {},
+        "dynamic_weights_result": {}, "compression_result": {},
+        "confidence_result": {}, "trigger_result": {}, "calendar_result": {},
+        "active_win_contract": "---", "active_wdo_contract": "---",
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
 
 init_session_state()
 
 
 def refresh_data():
-    dm = st.session_state.data_manager
+    # v10.1: Protecao contra data_manager ausente
+    dm = st.session_state.get("data_manager")
+    if dm is None:
+        logger.error("DataManager nao inicializado - tentando reiniciar...")
+        # Tenta reinicializar
+        try:
+            wt = dict(WIN_TRACKING) if isinstance(WIN_TRACKING, dict) and WIN_TRACKING else {}
+            dm = DataManager(mt5_config=MT5_CONFIG, dual_source=DUAL_SOURCE_ASSETS,
+                             yf_only=YF_SYMBOLS, win_tracking=wt)
+            st.session_state.data_manager = dm
+        except Exception as e:
+            logger.error(f"Falha ao reinicializar DataManager: {e}")
+            return {}
+    
     try:
         all_data = dm.get_all_data()
     except Exception as e:
