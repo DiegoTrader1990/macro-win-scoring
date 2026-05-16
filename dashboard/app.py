@@ -76,6 +76,29 @@ _cfg = _safe_import('config', [
     'CONFIDENCE_SCORE_CONFIG', 'CALENDAR_EVENTS_CONFIG',
 ])
 
+# v6.4: Fallback direct import if _safe_import failed
+if not _cfg or all(v is None for v in _cfg.values()):
+    try:
+        import importlib
+        _config_mod = importlib.import_module('config')
+        for _name in ['MT5_CONFIG', 'DUAL_SOURCE_ASSETS', 'YF_SYMBOLS', 'MACRO_WEIGHTS',
+                       'SIGNAL_CONFIG', 'CATEGORIES', 'DASHBOARD_CONFIG', 'LOG_CONFIG',
+                       'WIN_TRACKING', 'DIVERGENCE_CONFIG', 'UI_CONFIG',
+                       'SECTOR_GROUPS', 'MULTI_TIMEFRAME_CONFIG', 'KEY_LEVELS_CONFIG',
+                       'SCORE_SMOOTHER_CONFIG', 'PRICE_REVERSAL_CONFIG', 'ALERT_CONFIG',
+                       'SIGNAL_FILTER_CONFIG', 'PERFORMANCE_CONFIG', 'REGIME_CONFIG',
+                       'WIN_CONTRACT_CONFIG', 'MT5_SYMBOLS',
+                       'CONTEXT_CLASSIFIER_CONFIG', 'STRUCTURAL_CONTEXT_CONFIG',
+                       'DYNAMIC_WEIGHTS_CONFIG', 'COMPRESSION_DETECTOR_CONFIG',
+                       'CONFIDENCE_SCORE_CONFIG', 'CALENDAR_EVENTS_CONFIG']:
+            val = getattr(_config_mod, _name, None)
+            if val is not None:
+                _cfg[_name] = val
+        if _cfg:
+            logger.info(f"Fallback direct import recovered {len(_cfg)} config values")
+    except Exception as e2:
+        logger.error(f"Fallback config import also failed: {e2}")
+
 # Unpack config values with safe defaults
 # v6.4: Uses 'or' operator instead of .get(key, default) to handle
 # cases where _safe_import stored None (key exists with None value).
@@ -121,6 +144,8 @@ DYNAMIC_WEIGHTS_CONFIG = _cfg.get('DYNAMIC_WEIGHTS_CONFIG') or {}
 COMPRESSION_DETECTOR_CONFIG = _cfg.get('COMPRESSION_DETECTOR_CONFIG') or {}
 CONFIDENCE_SCORE_CONFIG = _cfg.get('CONFIDENCE_SCORE_CONFIG') or {}
 CALENDAR_EVENTS_CONFIG = _cfg.get('CALENDAR_EVENTS_CONFIG') or {}
+SECTOR_GROUPS = _cfg.get('SECTOR_GROUPS') or {}
+MULTI_TIMEFRAME_CONFIG = _cfg.get('MULTI_TIMEFRAME_CONFIG') or {}
 
 # Data sources
 _dm = _safe_import('data_sources.data_manager', ['DataManager'])
@@ -424,7 +449,7 @@ def init_session_state():
             st.stop()
 
         try:
-            wt = dict(WIN_TRACKING) if WIN_TRACKING else {}
+            wt = dict(WIN_TRACKING) if isinstance(WIN_TRACKING, dict) and WIN_TRACKING else {}
             if wt.get("mt5_symbol") == "AUTO":
                 resolved = resolve_win_contract()
                 if resolved:
@@ -439,7 +464,7 @@ def init_session_state():
             st.session_state.delta_analyzer = DeltaAnalyzer(SIGNAL_CONFIG) if DeltaAnalyzer else None
             st.session_state.divergence_detector = DivergenceDetector(DIVERGENCE_CONFIG) if DivergenceDetector else None
             st.session_state.key_levels = KeyLevelsCalculator(KEY_LEVELS_CONFIG) if KeyLevelsCalculator else None
-            st.session_state.sector_manager = SectorDataManager(SECTOR_GROUPS, MULTI_TIMEFRAME_CONFIG) if SectorDataManager else None
+            st.session_state.sector_manager = SectorDataManager(SECTOR_GROUPS, MULTI_TIMEFRAME_CONFIG) if SectorDataManager and SECTOR_GROUPS else None
             st.session_state.macro_logger = MacroLogger(LOG_CONFIG) if MacroLogger else None
 
             # v5.0 modules
@@ -496,6 +521,12 @@ def init_session_state():
         except Exception as e:
             st.error(f"Erro ao inicializar sistema: {e}")
             st.code(traceback.format_exc())
+            # Show which config values are missing
+            missing = [k for k in ['MT5_CONFIG', 'MACRO_WEIGHTS', 'SECTOR_GROUPS', 'UI_CONFIG'] 
+                       if k not in _cfg or _cfg[k] is None]
+            if missing:
+                st.warning(f"Config values ausentes: {', '.join(missing)}")
+                st.info("Verifique se o arquivo config.py esta no diretorio raiz do projeto.")
             st.stop()
 
 init_session_state()
