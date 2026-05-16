@@ -1,11 +1,12 @@
 """
-Dashboard Profissional - Macro Scoring WIN v6.2
+Dashboard Profissional - Macro Scoring WIN v9.0
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
+v9.0: IFNC/IMAT/ICON validados + Curva DI completa + 7 gatilhos
 v6.2: Fixed method name mismatches, DI1=F proxy, auto-refresh fix.
 v6.3: Windows compatibility - safe formatting, global error handling,
       no meta-refresh, None-safe dict access.
@@ -1234,6 +1235,18 @@ with tab_mesa:
             if ev_names:
                 st.markdown(f'<div class="recb" style="border-left-color:#FF9800;background:#FF980008"><span class="recl" style="color:#FF9800">EVENTO: {ev_names}</span><span class="recd">Pesos ajustados automaticamente</span></div>', unsafe_allow_html=True)
 
+        # ==== 4f. TRIGGER BANNER (v9.0) ====
+        if trigger_result and trigger_result.get("summary"):
+            trig_summary = trigger_result.get("summary", "")
+            trig_blocks = trigger_result.get("blocks", [])
+            if trig_blocks:
+                trig_bg = "#FF174418"; trig_border_c = "#FF174440"; trig_tc = "#FF8A80"
+            elif trig_fired:
+                trig_bg = "#00E67618"; trig_border_c = "#00E67640"; trig_tc = "#69F0AE"
+            else:
+                trig_bg = UI["bg_secondary"]; trig_border_c = UI["border_color"]; trig_tc = UI["text_secondary"]
+            st.markdown(f'<div class="recb" style="border-left-color:{trig_tc};background:{trig_bg}"><span class="recl" style="color:{trig_tc}">GATILHO: {trig_summary}</span></div>', unsafe_allow_html=True)
+
         # ==== 5. SECTOR GRID ====
         st.markdown('<div class="sech">SETORES <span class="secr">5m / 15m / dia</span></div>', unsafe_allow_html=True)
 
@@ -1404,7 +1417,7 @@ with tab_mesa:
         # The meta tag conflicts with Streamlit's state management on Windows
         st.markdown(f"""
         <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-            AUTO-REFRESH {interval}s | v6.3 | Context + Structural + Dynamic + Confidence
+            AUTO-REFRESH {interval}s | v9.0 | IFNC+ICON+IMAT | Curva DI | 7 Triggers
         </div>
         """, unsafe_allow_html=True)
         st.markdown(f"""<script>
