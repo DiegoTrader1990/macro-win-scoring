@@ -14,8 +14,12 @@ v6.4: Fixed critical NoneType bug in _safe_import + config unpacking.
 Para rodar: streamlit run dashboard/app.py
 """
 
-import sys, os, time, traceback
+import sys, os, time, traceback, logging
 from datetime import datetime
+
+# v6.5: Setup logging FIRST so logger is available for all subsequent code
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # CRITICAL: Resolve project root BEFORE any other imports
 # This must work regardless of where streamlit is launched from
@@ -45,17 +49,13 @@ for _ in range(3):
         break
     _walk_dir = os.path.dirname(_walk_dir)
 
-# Log the paths for debugging
+# Log the paths for debugging (logger now defined above - v6.5 fix)
 logger.info(f"App dir: {_APP_DIR}")
 logger.info(f"Project root: {_PROJECT_ROOT}")
 logger.info(f"CWD: {_cwd}")
 logger.info(f"Config found: {os.path.isfile(os.path.join(_PROJECT_ROOT, 'config.py'))}")
 
 import streamlit as st
-import logging
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
 
 # ============ SAFE IMPORTS WITH FALLBACK ============
 # Each import is wrapped so a single failure doesn't crash the whole app
