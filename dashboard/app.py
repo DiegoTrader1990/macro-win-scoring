@@ -1164,6 +1164,7 @@ with tab_mesa:
         compression_result = st.session_state.get("compression_result", {})
         confidence_result = st.session_state.get("confidence_result", {})
         calendar_result = st.session_state.get("calendar_result", {})
+        trigger_result = st.session_state.get("trigger_result", {})
 
         # ==== 0. ALERT BAR ====
         alert_result = st.session_state.get("alert_result", {})
