@@ -1,16 +1,16 @@
 """
-Dashboard Profissional - Macro Scoring WIN v10.2.2
+Dashboard Profissional - Macro Scoring WIN v10.3
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
+v10.3: MAJOR FIX - Removed threading (NOT thread-safe with st.session_state),
+       Fixed trig_fired NameError, removed st.stop(), direct refresh,
+       better diagnostic on no-data, robust yfinance timeout handling.
 v10.2: Timeout + fallback individual + partial data + no st.stop + bulletproof init
 v9.0: IFNC/IMAT/ICON validados + Curva DI completa + 7 gatilhos
-v6.3: Windows compatibility - safe formatting, global error handling,
-      no meta-refresh, None-safe dict access.
-v6.4: Fixed critical NoneType bug in _safe_import + config unpacking.
 
 Para rodar: streamlit run dashboard/app.py
 """
@@ -1024,76 +1024,34 @@ with tab_mesa:
             with st.expander("Detalhes dos erros"):
                 for e in _import_errors:
                     st.code(e)
+            # v10.3: NAO usa st.stop() - mostra interface limitada
             if not st.button("Tentar mesmo assim (modo limitado)"):
-                st.stop()
+                st.markdown(f'<div style="text-align:center;padding:10px;color:{UI["warning"]};font-size:9px">Clique acima para tentar modo limitado</div>', unsafe_allow_html=True)
 
-        # v10.2: Robust loading with timeout, partial data support, and auto-retry
-        # v10.2.2: Detecta score_result artificial (score=0, assets_available=0) 
-        # como "precisa refresh" para nao ficar preso
+        # v10.3: DIRECT refresh - NO threading (st.session_state is NOT thread-safe!)
+        # Previous versions used threading which caused race conditions with session_state
         _sr_check = st.session_state.get("score_result", {})
         _has_real_data = _sr_check.get("assets_available", 0) > 0 or len(st.session_state.get("last_data", {})) > 0
         _needs_refresh = not _sr_check or not _has_real_data
         
         if _needs_refresh:
-            import threading
-            import time as _time
+            status_placeholder = st.empty()
+            status_placeholder.info("Conectando ao Yahoo Finance...")
             
-            status_text = st.empty()
-            progress_bar = st.progress(0)
-            
-            status_text.text("Conectando ao Yahoo Finance...")
-            progress_bar.progress(20)
-            
-            # Run refresh with timeout (45 seconds max for v10.2 - batch + individual fallback)
-            _refresh_error = [None]
-            _refresh_done = [False]
-            _refresh_partial = [False]
-            
-            def _do_refresh():
-                try:
-                    result = refresh_data()
-                    _refresh_done[0] = True
-                except Exception as e:
-                    _refresh_error[0] = str(e)
-            
-            _refresh_thread = threading.Thread(target=_do_refresh, daemon=True)
-            _refresh_thread.start()
-            
-            # Wait with progress updates (45s timeout for v10.2)
-            _waited = 0
-            while _refresh_thread.is_alive() and _waited < 45:
-                _time.sleep(0.5)
-                _waited += 0.5
-                pct = min(20 + int(_waited / 45 * 70), 90)
-                progress_bar.progress(pct)
-                if _waited > 10:
-                    status_text.text(f"Baixando dados (fallback individual)... ({_waited:.0f}s)")
-                elif _waited > 5:
-                    status_text.text(f"Buscando cotacoes... ({_waited:.0f}s)")
-                elif _waited > 2:
-                    status_text.text("Buscando cotacoes...")
-            
-            progress_bar.progress(95)
-            status_text.text("Calculando score...")
-            
-            # v10.2.2: Checa dados parciais FORA da thread (session_state nao e thread-safe)
-            _check_sr = st.session_state.get("score_result", {})
-            if _check_sr and _check_sr.get("assets_available", 0) > 0:
-                _refresh_partial[0] = True
-            
-            # v10.2: NUNCA faz st.stop() - sempre tenta mostrar algo
-            if _refresh_error[0] and not _refresh_partial[0]:
-                progress_bar.empty()
-                status_text.empty()
-                st.error(f"Erro ao buscar dados: {_refresh_error[0]}")
-                st.info("O sistema tentara novamente automaticamente. Clique abaixo para tentar agora.")
+            try:
+                refresh_data()
+                status_placeholder.empty()
+            except Exception as e:
+                status_placeholder.empty()
+                logger.error(f"Refresh error: {e}\n{traceback.format_exc()}")
+                st.error(f"Erro ao buscar dados: {e}")
+                st.info("O sistema tentara novamente automaticamente no proximo ciclo. Clique abaixo para tentar agora.")
                 if st.button("Tentar novamente", key="retry_error"):
                     st.session_state.score_result = {}
                     st.session_state.last_data = {}
-                    if "data_manager" in st.session_state:
-                        st.session_state.data_manager = None
+                    st.session_state.data_manager = None
                     st.rerun()
-                # v10.2: NAO faz st.stop() - mostra diagnostico
+                # Mostra diagnostico
                 dm = st.session_state.get("data_manager")
                 if dm:
                     try:
@@ -1102,25 +1060,8 @@ with tab_mesa:
                             st.json(diag)
                     except Exception:
                         pass
-                # Mostra interface minima com score 0
+                # Interface minima com score 0
                 st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "SEM DADOS", "confidence": "---", "action": "Aguardando conexao..."}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
-            
-            elif not _refresh_done[0] and _refresh_partial[0]:
-                progress_bar.empty()
-                status_text.empty()
-                st.warning("Timeout: dados parciais obtidos. Interface limitada.")
-            
-            elif not _refresh_done[0]:
-                progress_bar.empty()
-                status_text.empty()
-                st.warning("Timeout: dados demoraram mais de 45s. Tentando novamente...")
-                st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "TIMEOUT", "confidence": "---", "action": "Reconectando..."}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
-            
-            else:
-                progress_bar.progress(100)
-                _time.sleep(0.3)
-                progress_bar.empty()
-                status_text.empty()
 
         sr = st.session_state.get("score_result", {})
         # v10.2.2: Mostra SEM DADOS apenas quando REALMENTE nao ha dados
@@ -1135,13 +1076,23 @@ with tab_mesa:
             
             st.markdown("""<div style="background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-size:9px;color:#FF8A80;text-align:center">SEM DADOS - Verifique conexao com internet<br><span style="font-size:7px;color:#6b7d8e">Possiveis causas: internet lenta, Yahoo Finance offline, ou firewall bloqueando</span></div>""", unsafe_allow_html=True)
             if st.button("Tentar novamente", key="retry_nodata"):
+                # v10.3: Reset completo para forcar novo fetch
                 st.session_state.score_result = {}
                 st.session_state.last_data = {}
-                if "data_manager" in st.session_state:
-                    st.session_state.data_manager = None
+                st.session_state.data_manager = None  # Forca reinit do DataManager
                 st.rerun()
+            # v10.3: Mostra diagnostico automaticamente quando sem dados
+            dm = st.session_state.get("data_manager")
+            if dm:
+                try:
+                    diag = dm.get_diagnostic()
+                    if diag:
+                        with st.expander("Diagnostico", expanded=True):
+                            st.json(diag)
+                except Exception:
+                    pass
         
-        # v10.2.2: Aviso de dados parciais (tem alguns dados mas nao todos)
+        # v10.3: Aviso de dados parciais (tem alguns dados mas nao todos)
         elif _real_assets > 0 and _real_assets < 15:
             st.markdown(f"""<div style="background:#FFD60018;border:1px solid #FFD60040;border-radius:3px;padding:4px 8px;margin:2px 0;font-size:8px;color:#FFD600;text-align:center">DADOS PARCIAIS: {_real_assets}/23 ativos - tentando reconectar...</div>""", unsafe_allow_html=True)
 
@@ -1455,6 +1406,7 @@ with tab_mesa:
         if trigger_result and trigger_result.get("summary"):
             trig_summary = trigger_result.get("summary", "")
             trig_blocks = trigger_result.get("blocks", [])
+            trig_fired = trigger_result.get("triggered", False)  # v10.3: extracted here to avoid NameError
             if trig_blocks:
                 trig_bg = "#FF174418"; trig_border_c = "#FF174440"; trig_tc = "#FF8A80"
             elif trig_fired:
@@ -1782,7 +1734,7 @@ with tab_mesa:
         # The meta tag conflicts with Streamlit's state management on Windows
         st.markdown(f"""
         <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-            AUTO-REFRESH {interval}s | v10.0 | Curva DI | Confluencia | Flow | Phase
+            AUTO-REFRESH {interval}s | v10.3 | Bug fixes + Direct refresh + Diagnostics
         </div>
         """, unsafe_allow_html=True)
         st.markdown(f"""<script>

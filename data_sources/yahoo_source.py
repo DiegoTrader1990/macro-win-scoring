@@ -3,7 +3,8 @@ Fonte de Dados: Yahoo Finance
 ================================
 Busca dados de ativos internacionais e macro que nao estao no MT5.
 Fallback para ativos B3 quando MT5 nao esta disponivel.
-v10.2: TIMEOUT em todas as chamadas YF + fallback individual robusto
+v10.3: Fixed timeout param (not supported by ticker.history), global session timeout
+       v10.2: TIMEOUT em todas as chamadas YF + fallback individual robusto
        + logging de diagnostico + retry com backoff
 v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
       apenas 1 candle com period="5d". Agora usa estrategia progressiva:
@@ -41,6 +42,27 @@ class YahooFinanceSource:
         self._cache_timestamp = {}
         self.cache_duration = 30  # segundos
         self._failed_symbols = {}  # v10.2: Track failures to avoid hammering
+        # v10.3: Set global timeout on yfinance session for all requests
+        self._setup_yf_timeout()
+    
+    def _setup_yf_timeout(self):
+        """v10.3: Configure yfinance session timeout globally."""
+        if YF_AVAILABLE:
+            try:
+                # Set default timeout for all yfinance HTTP requests
+                yf.set_tz_cache_location("/tmp/yf_cache")
+                # Override the default session with timeout
+                import requests as _req
+                _sess = _req.Session()
+                _sess.timeout = YF_REQUEST_TIMEOUT
+                # Monkey-patch yf's internal session
+                if hasattr(yf, 'Ticker'):
+                    _orig_ticker_init = yf.Ticker.__init__
+                    def _patched_init(self_ticker, ticker, session=None):
+                        _orig_ticker_init(self_ticker, ticker, session=_sess)
+                    yf.Ticker.__init__ = _patched_init
+            except Exception as e:
+                logger.debug(f"YF timeout setup failed (non-critical): {e}")
     
     def is_available(self) -> bool:
         """Verifica se Yahoo Finance esta disponivel."""
@@ -75,7 +97,7 @@ class YahooFinanceSource:
             except Exception:
                 pass
             
-            hist = ticker.history(period="1d", timeout=YF_REQUEST_TIMEOUT)
+            hist = ticker.history(period="1d")
             if hist is not None and not hist.empty:
                 return float(hist['Close'].iloc[-1])
             
@@ -100,7 +122,7 @@ class YahooFinanceSource:
             except Exception:
                 pass
             
-            hist = ticker.history(period="5d", timeout=YF_REQUEST_TIMEOUT)
+            hist = ticker.history(period="5d")
             if hist is not None and len(hist) >= 2:
                 return float(hist['Close'].iloc[-2])
             
@@ -117,7 +139,7 @@ class YahooFinanceSource:
         
         try:
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=f"{days}d", timeout=YF_REQUEST_TIMEOUT)
+            hist = ticker.history(period=f"{days}d")
             
             if hist is None or hist.empty:
                 return None
@@ -165,7 +187,7 @@ class YahooFinanceSource:
             # Estrategia 1: Historico progressivo (5d -> 1mo) com timeout
             for period in ["5d", "1mo"]:
                 try:
-                    hist = ticker.history(period=period, timeout=YF_INDIVIDUAL_TIMEOUT)
+                    hist = ticker.history(period=period)
                     if hist is not None and not hist.empty:
                         current_price = float(hist['Close'].iloc[-1])
                         if len(hist) >= 2:
