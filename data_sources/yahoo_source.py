@@ -3,7 +3,8 @@ Fonte de Dados: Yahoo Finance
 ================================
 Busca dados de ativos internacionais e macro que nao estao no MT5.
 Fallback para ativos B3 quando MT5 nao esta disponivel.
-v10.3: Fixed timeout param (not supported by ticker.history), global session timeout
+v10.3.1: Fixed yfinance 1.3.0 MultiIndex format (ticker, Close) vs old (Close, ticker)
+       v10.3: Fixed timeout param (not supported by ticker.history), global session timeout
        v10.2: TIMEOUT em todas as chamadas YF + fallback individual robusto
        + logging de diagnostico + retry com backoff
 v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
@@ -42,27 +43,8 @@ class YahooFinanceSource:
         self._cache_timestamp = {}
         self.cache_duration = 30  # segundos
         self._failed_symbols = {}  # v10.2: Track failures to avoid hammering
-        # v10.3: Set global timeout on yfinance session for all requests
-        self._setup_yf_timeout()
-    
-    def _setup_yf_timeout(self):
-        """v10.3: Configure yfinance session timeout globally."""
-        if YF_AVAILABLE:
-            try:
-                # Set default timeout for all yfinance HTTP requests
-                yf.set_tz_cache_location("/tmp/yf_cache")
-                # Override the default session with timeout
-                import requests as _req
-                _sess = _req.Session()
-                _sess.timeout = YF_REQUEST_TIMEOUT
-                # Monkey-patch yf's internal session
-                if hasattr(yf, 'Ticker'):
-                    _orig_ticker_init = yf.Ticker.__init__
-                    def _patched_init(self_ticker, ticker, session=None):
-                        _orig_ticker_init(self_ticker, ticker, session=_sess)
-                    yf.Ticker.__init__ = _patched_init
-            except Exception as e:
-                logger.debug(f"YF timeout setup failed (non-critical): {e}")
+        # v10.3.1: NAO set session - yfinance 1.3.0 usa curl_cffi internamente
+        # e REJEITA requests.Session. Deixar yf gerenciar sua propria sessao.
     
     def is_available(self) -> bool:
         """Verifica se Yahoo Finance esta disponivel."""
@@ -335,21 +317,43 @@ class YahooFinanceBatch:
                         close_series = None
                         
                         if is_multiindex:
+                            # v10.3.1: yfinance>=1.3.0 uses (symbol, field) format
+                            # Older versions use (field, symbol). Try both.
+                            close_series = None
+                            
+                            # Strategy 1: Detect column format from first column
+                            _first_col = data.columns[0]
+                            if _first_col[0] in ('Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close'):
+                                # OLD format: ('Close', 'SYMBOL')
+                                _col_key = ('Close', yf_symbol)
+                            else:
+                                # NEW format: ('SYMBOL', 'Close') - yfinance >= 1.3.0
+                                _col_key = (yf_symbol, 'Close')
+                            
                             try:
-                                close_series = data[('Close', yf_symbol)].dropna()
+                                close_series = data[_col_key].dropna()
                             except (KeyError, TypeError):
+                                # Fallback: try the other format
+                                _alt_key = (yf_symbol, 'Close') if _col_key[0] == 'Close' else ('Close', yf_symbol)
                                 try:
-                                    close_series = data[(yf_symbol, 'Close')].dropna()
+                                    close_series = data[_alt_key].dropna()
                                 except (KeyError, TypeError):
-                                    close_cols = [c for c in data.columns if c[0] == 'Close' and yf_symbol in str(c)]
+                                    # Last resort: search by string match
+                                    close_cols = [c for c in data.columns if c[1] == 'Close' and yf_symbol in str(c[0])]
+                                    if not close_cols:
+                                        close_cols = [c for c in data.columns if c[0] == 'Close' and yf_symbol in str(c[1])]
                                     if close_cols:
                                         close_series = data[close_cols[0]].dropna()
                         elif is_multi_ticker:
+                            # v10.3.1: Try both access patterns for non-MultiIndex multi-ticker
                             try:
                                 ticker_data = data[yf_symbol]
                                 close_series = ticker_data['Close'].dropna()
                             except (KeyError, TypeError):
-                                pass
+                                try:
+                                    close_series = data[(yf_symbol, 'Close')].dropna()
+                                except (KeyError, TypeError):
+                                    pass
                         else:
                             try:
                                 close_series = data['Close'].dropna()
