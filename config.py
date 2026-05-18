@@ -18,7 +18,7 @@ v9.0 - IFNC/IMAT/ICON com correlacao REAL + Curva DI completa:
 # CONFIGURACAO DO MT5 (CORRETORA RICO)
 # ============================================================
 MT5_CONFIG = {
-    "path": r"C:\Program Files\MetaTrader 5\terminal64.exe",
+    "path": r"C:\Program Files\Rico\MetaTrader 5\terminal64.exe",
     "login": None,
     "password": None,
     "server": "Rico",

@@ -1,15 +1,15 @@
 """
-Dashboard Profissional - Macro Scoring WIN v10.3
+Dashboard Profissional - Macro Scoring WIN v11.0
 =================================================
 Layout ultra-compacto: blocos lado a lado, sem scroll.
 Modulos v5.0: ScoreSmoother, PriceReversal, RegimeDetector,
 SignalManager, PerformanceTracker, AlertSystem, Dynamic Contracts.
 Modulos v6.0: ContextClassifier, StructuralContext, DynamicWeights,
 CompressionDetector, ConfidenceScore, CalendarEvents.
-v10.3: MAJOR FIX - Removed threading (NOT thread-safe with st.session_state),
+v11.0: REESCRITO - Correcao definitiva, MT5 Rico, YF robusto, SEM st.stop, auto-refresh Streamlit
        Fixed trig_fired NameError, removed st.stop(), direct refresh,
        better diagnostic on no-data, robust yfinance timeout handling.
-v10.2: Timeout + fallback individual + partial data + no st.stop + bulletproof init
+v10.3: Removed threading, fixed trig_fired, no st.stop()
 v9.0: IFNC/IMAT/ICON validados + Curva DI completa + 7 gatilhos
 
 Para rodar: streamlit run dashboard/app.py
@@ -266,7 +266,7 @@ if CRITICAL_FAILURES:
 # v6.4: Triple-safe UI assignment - guaranteed to always be a valid dict
 UI = UI_CONFIG if isinstance(UI_CONFIG, dict) else _UI_DEFAULTS
 
-st.set_page_config(page_title="Macro WIN v10.2", page_icon="W", layout="centered",
+st.set_page_config(page_title="Macro WIN v11.0", page_icon="W", layout="centered",
                    initial_sidebar_state="collapsed")
 
 # ============ SAFE FORMAT HELPER (v6.3) ============
@@ -1024,9 +1024,7 @@ with tab_mesa:
             with st.expander("Detalhes dos erros"):
                 for e in _import_errors:
                     st.code(e)
-            # v10.3: NAO usa st.stop() - mostra interface limitada
-            if not st.button("Tentar mesmo assim (modo limitado)"):
-                st.markdown(f'<div style="text-align:center;padding:10px;color:{UI["warning"]};font-size:9px">Clique acima para tentar modo limitado</div>', unsafe_allow_html=True)
+            # v11.0: NAO usa st.stop() nem button bloqueante - continua renderizacao
 
         # v10.3: DIRECT refresh - NO threading (st.session_state is NOT thread-safe!)
         # Previous versions used threading which caused race conditions with session_state
@@ -1074,14 +1072,28 @@ with tab_mesa:
                 st.session_state.score_result = {"score": 0, "signal": {"type": "NEUTRO", "label": "AGUARDANDO", "confidence": "---", "action": "Sem dados no momento"}, "category_scores": {}, "assets_available": 0, "assets_total": 23}
                 sr = st.session_state.score_result
             
-            st.markdown("""<div style="background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-size:9px;color:#FF8A80;text-align:center">SEM DADOS - Verifique conexao com internet<br><span style="font-size:7px;color:#6b7d8e">Possiveis causas: internet lenta, Yahoo Finance offline, ou firewall bloqueando</span></div>""", unsafe_allow_html=True)
-            if st.button("Tentar novamente", key="retry_nodata"):
-                # v10.3: Reset completo para forcar novo fetch
-                st.session_state.score_result = {}
-                st.session_state.last_data = {}
-                st.session_state.data_manager = None  # Forca reinit do DataManager
-                st.rerun()
-            # v10.3: Mostra diagnostico automaticamente quando sem dados
+            st.markdown("""<div style="background:#FF174418;border:1px solid #FF174440;border-radius:3px;padding:8px;margin:4px 0;font-size:9px;color:#FF8A80;text-align:center">SEM DADOS - Verifique conexao com internet<br><span style="font-size:7px;color:#6b7d8e">Possiveis causas: internet lenta, Yahoo Finance offline, firewall, ou MT5 desconectado</span></div>""", unsafe_allow_html=True)
+            
+            # v11.0: Botao para tentar MT5 + YF
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Tentar novamente", key="retry_nodata"):
+                    st.session_state.score_result = {}
+                    st.session_state.last_data = {}
+                    st.session_state.data_manager = None
+                    st.rerun()
+            with col2:
+                if st.button("Conectar MT5 Rico", key="connect_mt5"):
+                    dm = st.session_state.get("data_manager")
+                    if dm:
+                        ok, msg = dm.connect_mt5()
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.warning(msg)
+                    st.rerun()
+            
+            # v11.0: Diagnostico automatico expandido
             dm = st.session_state.get("data_manager")
             if dm:
                 try:
@@ -1089,6 +1101,11 @@ with tab_mesa:
                     if diag:
                         with st.expander("Diagnostico", expanded=True):
                             st.json(diag)
+                        # v11.0: Mostra status MT5
+                        mt5_ok = dm.is_mt5_connected()
+                        mt5_status = "CONECTADO" if mt5_ok else "DESCONECTADO"
+                        mt5_color = "#00E676" if mt5_ok else "#FF1744"
+                        st.markdown(f'<div style="padding:4px;font-size:8px">MT5 Rico: <b style="color:{mt5_color}">{mt5_status}</b> | YF: <b style="color:#4FC3F7">{"OK" if dm.yf.is_available() else "OFFLINE"}</b></div>', unsafe_allow_html=True)
                 except Exception:
                     pass
         
@@ -1724,22 +1741,23 @@ with tab_mesa:
             </div>
             """, unsafe_allow_html=True)
 
-        # ==== 10. AUTO-REFRESH (v6.3: JS-based, no meta tag) ====
+        # ==== 10. AUTO-REFRESH (v11.0: Streamlit native) ====
         interval = st.session_state.get("interval", 30)
-        try:
-            time.sleep(1)
-        except Exception:
-            pass
-        # Safe auto-refresh using JavaScript instead of <meta http-equiv="refresh">
-        # The meta tag conflicts with Streamlit's state management on Windows
+        # v11.0: Usa st.empty + time para auto-refresh SEM JavaScript
+        # JavaScript reload causa "Connection error" no Streamlit
         st.markdown(f"""
         <div style="text-align:center;padding:2px;font-size:6px;color:{UI['text_muted']};font-family:{UI['font_family_data']}">
-            AUTO-REFRESH {interval}s | v10.3 | Bug fixes + Direct refresh + Diagnostics
+            AUTO-REFRESH {interval}s | v11.0 | MT5+YF Robusto
         </div>
         """, unsafe_allow_html=True)
-        st.markdown(f"""<script>
-        setTimeout(function(){{window.location.reload()}}, {interval * 1000});
-        </script>""", unsafe_allow_html=True)
+        # v11.0: Auto-refresh via Streamlit time.sleep + st.rerun()
+        # Isso e mais estavel que JS window.location.reload()
+        _last_refresh = st.session_state.get("last_refresh_time", 0)
+        _now = time.time()
+        if _now - _last_refresh >= interval:
+            st.session_state["last_refresh_time"] = _now
+            time.sleep(0.5)
+            st.rerun()
 
     # ====== GLOBAL ERROR HANDLER (v6.3) ======
     except Exception as e:

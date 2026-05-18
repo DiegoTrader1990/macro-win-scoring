@@ -3,18 +3,15 @@ Fonte de Dados: Yahoo Finance
 ================================
 Busca dados de ativos internacionais e macro que nao estao no MT5.
 Fallback para ativos B3 quando MT5 nao esta disponivel.
-v10.3.1: Fixed yfinance 1.3.0 MultiIndex format (ticker, Close) vs old (Close, ticker)
-       v10.3: Fixed timeout param (not supported by ticker.history), global session timeout
-       v10.2: TIMEOUT em todas as chamadas YF + fallback individual robusto
-       + logging de diagnostico + retry com backoff
-v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
-      apenas 1 candle com period="5d". Agora usa estrategia progressiva:
-      5d -> 1mo -> fast_info.previous_close -> info.previousClose
+v11.0: REESCRITO - fetch individual por padrao (mais robusto),
+       batch apenas como otimizacao opcional,
+       yfinance 1.3.0 MultiIndex compat, sem timeout invalido,
+       retry agressivo com backoff.
 """
 
 import logging
 import time as _time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 from typing import Dict, Optional
 
@@ -23,53 +20,54 @@ logger = logging.getLogger(__name__)
 try:
     import yfinance as yf
     YF_AVAILABLE = True
-    logger.info("yfinance package encontrado")
+    YF_VERSION = getattr(yf, '__version__', '0.0.0')
+    logger.info(f"yfinance {YF_VERSION} encontrado")
 except ImportError:
     YF_AVAILABLE = False
+    YF_VERSION = '0.0.0'
     logger.warning("yfinance NAO encontrado. Instale com: pip install yfinance")
 
-# v10.2: Timeout global para requests YF (segundos)
-YF_REQUEST_TIMEOUT = 15
-YF_BATCH_TIMEOUT = 30
-YF_INDIVIDUAL_TIMEOUT = 10
+# v11.0: Constantes de timeout e retry
 MAX_RETRIES = 2
+RETRY_BACKOFF = 1.5  # segundos entre retries
+COOLDOWN_SECONDS = 90  # cooldown para simbolos que falharam
 
 
 class YahooFinanceSource:
     """Fonte de dados via Yahoo Finance para ativos macro internacionais."""
-    
+
     def __init__(self):
         self._cache = {}
         self._cache_timestamp = {}
         self.cache_duration = 30  # segundos
-        self._failed_symbols = {}  # v10.2: Track failures to avoid hammering
-        # v10.3.1: NAO set session - yfinance 1.3.0 usa curl_cffi internamente
-        # e REJEITA requests.Session. Deixar yf gerenciar sua propria sessao.
-    
+        self._failed_symbols = {}  # Track failures to avoid hammering
+
     def is_available(self) -> bool:
         """Verifica se Yahoo Finance esta disponivel."""
         return YF_AVAILABLE
-    
+
     def _is_symbol_failed(self, symbol: str) -> bool:
-        """v10.2: Checa se simbolo falhou recentemente (evita retry infinito)."""
+        """Checa se simbolo falhou recentemente (evita retry infinito)."""
         if symbol in self._failed_symbols:
             fail_time = self._failed_symbols[symbol]
-            # Espera 60s antes de tentar novamente
-            if (_time.time() - fail_time) < 60:
+            if (_time.time() - fail_time) < COOLDOWN_SECONDS:
                 return True
             else:
                 del self._failed_symbols[symbol]
         return False
-    
+
     def _mark_symbol_failed(self, symbol: str):
-        """v10.2: Marca simbolo como falho para evitar retry imediato."""
+        """Marca simbolo como falho para evitar retry imediato."""
         self._failed_symbols[symbol] = _time.time()
-    
+
+    def _clear_symbol_failed(self, symbol: str):
+        """Limpa falha ao sucesso."""
+        self._failed_symbols.pop(symbol, None)
+
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Obtem preco atual de um ativo via Yahoo Finance."""
         if not YF_AVAILABLE:
             return None
-        
         try:
             ticker = yf.Ticker(symbol)
             try:
@@ -78,95 +76,56 @@ class YahooFinanceSource:
                     return float(price)
             except Exception:
                 pass
-            
             hist = ticker.history(period="1d")
             if hist is not None and not hist.empty:
                 return float(hist['Close'].iloc[-1])
-            
             return None
-            
         except Exception as e:
             logger.debug(f"YF: Erro ao buscar preco de '{symbol}': {e}")
             return None
-    
+
     def get_previous_close(self, symbol: str) -> Optional[float]:
         """Obtem o fechamento anterior via Yahoo Finance."""
         if not YF_AVAILABLE:
             return None
-        
         try:
             ticker = yf.Ticker(symbol)
-            
             try:
                 prev = ticker.fast_info.previous_close
                 if prev and prev > 0:
                     return float(prev)
             except Exception:
                 pass
-            
             hist = ticker.history(period="5d")
             if hist is not None and len(hist) >= 2:
                 return float(hist['Close'].iloc[-2])
-            
             return None
-            
         except Exception as e:
             logger.debug(f"YF: Erro ao buscar fechamento anterior de '{symbol}': {e}")
             return None
-    
-    def get_daily_candles(self, symbol: str, days: int = 30) -> Optional[list]:
-        """Obtem candles diarios via Yahoo Finance."""
-        if not YF_AVAILABLE:
-            return None
-        
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=f"{days}d")
-            
-            if hist is None or hist.empty:
-                return None
-            
-            candles = []
-            for index, row in hist.iterrows():
-                candles.append({
-                    "date": index.to_pydatetime(),
-                    "open": float(row['Open']),
-                    "high": float(row['High']),
-                    "low": float(row['Low']),
-                    "close": float(row['Close']),
-                    "volume": int(row['Volume']),
-                })
-            return candles
-            
-        except Exception as e:
-            logger.debug(f"YF: Erro ao buscar candles de '{symbol}': {e}")
-            return None
-    
+
     def get_asset_data(self, symbol: str, retry_count: int = 0) -> Optional[dict]:
         """
         Obtem dados completos de um ativo via Yahoo Finance.
-        v10.2: Timeout + retry com backoff + diagnostico melhorado.
-        v9.1: Corrigido para ETFs brasileiros (IFNC/IMAT/ICON) que retornam
-        apenas 1 candle com period="5d". Agora tenta:
-        1. Historico progressivo (5d -> 1mo)
-        2. fast_info.previous_close (para ETFs com historico limitado)
-        3. info.previousClose (ultimo recurso)
-        4. fast_info.last_price (v10.2)
+        Estrategia progressiva:
+        1. Historico (5d -> 1mo)
+        2. fast_info.previous_close
+        3. info.previousClose
+        4. fast_info.last_price
         """
         if not YF_AVAILABLE:
             return None
-        
-        # v10.2: Skip recently failed symbols
+
         if self._is_symbol_failed(symbol):
             logger.debug(f"YF: Pulando '{symbol}' - falhou recentemente")
             return None
-        
+
         try:
             ticker = yf.Ticker(symbol)
             prev_close = None
             current_price = None
-            
-            # Estrategia 1: Historico progressivo (5d -> 1mo) com timeout
+
+            # Estrategia 1: Historico progressivo (5d -> 1mo)
             for period in ["5d", "1mo"]:
                 try:
                     hist = ticker.history(period=period)
@@ -175,13 +134,12 @@ class YahooFinanceSource:
                         if len(hist) >= 2:
                             prev_close = float(hist['Close'].iloc[-2])
                             break
-                        # Se so tem 1 candle, tenta proximo periodo
-                        continue
+                        continue  # So 1 candle, tenta proximo periodo
                 except Exception as e:
                     logger.debug(f"YF: history({period}) falhou para '{symbol}': {e}")
                     continue
-            
-            # Estrategia 2: fast_info para previous_close (ETFs com historico curto)
+
+            # Estrategia 2: fast_info para previous_close
             if prev_close is None and current_price is not None:
                 try:
                     fi_prev = ticker.fast_info.previous_close
@@ -189,8 +147,8 @@ class YahooFinanceSource:
                         prev_close = float(fi_prev)
                 except Exception:
                     pass
-            
-            # Estrategia 3: Tenta .info para previousClose
+
+            # Estrategia 3: .info para previousClose
             if prev_close is None and current_price is not None:
                 try:
                     info = ticker.info
@@ -198,8 +156,8 @@ class YahooFinanceSource:
                         prev_close = float(info['previousClose'])
                 except Exception:
                     pass
-            
-            # Estrategia 4 (v10.2): Se nada funcionou, tenta fast_info.last_price
+
+            # Estrategia 4: fast_info.last_price
             if current_price is None:
                 try:
                     price = ticker.fast_info.last_price
@@ -213,26 +171,25 @@ class YahooFinanceSource:
                             pass
                 except Exception:
                     pass
-            
+
             if current_price is None:
-                # v10.2: Retry once with backoff
                 if retry_count < MAX_RETRIES:
-                    logger.warning(f"YF: Sem dados para '{symbol}', tentando novamente ({retry_count+1}/{MAX_RETRIES})...")
-                    _time.sleep(1 * (retry_count + 1))  # Backoff
+                    logger.warning(f"YF: Sem dados para '{symbol}', retry ({retry_count+1}/{MAX_RETRIES})...")
+                    _time.sleep(RETRY_BACKOFF * (retry_count + 1))
                     result = self.get_asset_data(symbol, retry_count + 1)
                     if result:
                         return result
                 self._mark_symbol_failed(symbol)
-                logger.warning(f"YF: Falha definitiva para '{symbol}' - nenhum dado disponivel")
+                logger.warning(f"YF: Falha definitiva para '{symbol}'")
                 return None
-            
+
             result = {
                 "source": "yahoo_finance",
                 "symbol": symbol,
                 "current_price": current_price,
                 "timestamp": datetime.now(),
             }
-            
+
             if prev_close is not None and prev_close > 0:
                 result["previous_close"] = prev_close
                 result["change_pct"] = ((current_price - prev_close) / prev_close) * 100
@@ -241,131 +198,143 @@ class YahooFinanceSource:
                 result["previous_close"] = None
                 result["change_pct"] = None
                 result["change_points"] = None
-            
-            # v10.2: Limpa falha ao sucesso
-            if symbol in self._failed_symbols:
-                del self._failed_symbols[symbol]
-            
+
+            self._clear_symbol_failed(symbol)
             return result
-            
+
         except Exception as e:
             logger.warning(f"YF: Erro ao buscar dados de '{symbol}': {e}")
             self._mark_symbol_failed(symbol)
-            
-            # v10.2: Retry
             if retry_count < MAX_RETRIES:
-                _time.sleep(1 * (retry_count + 1))
+                _time.sleep(RETRY_BACKOFF * (retry_count + 1))
                 return self.get_asset_data(symbol, retry_count + 1)
-            
             return None
-    
-    def get_multi_asset_data(self, symbols: dict) -> Dict[str, dict]:
-        """Busca dados de multiplos ativos de forma eficiencial."""
-        results = {}
-        
-        for name, yf_symbol in symbols.items():
-            try:
-                data = self.get_asset_data(yf_symbol)
-                if data:
-                    data["internal_name"] = name
-                    results[name] = data
-            except Exception as e:
-                logger.warning(f"YF: Falha ao buscar '{name}' ({yf_symbol}): {e}")
-        
-        return results
 
 
 class YahooFinanceBatch:
     """Busca em lote para multiplos ativos (mais eficiente)."""
-    
+
+    @staticmethod
+    def _extract_close_series(data, yf_symbol, is_multi_ticker):
+        """
+        Extrai a serie Close para um simbolo do DataFrame do yf.download.
+        Compativel com yfinance 1.3.0 (MultiIndex (ticker, field))
+        e versoes antigas (MultiIndex (field, ticker)).
+        """
+        if data is None or data.empty:
+            return None
+
+        is_multiindex = isinstance(data.columns, pd.MultiIndex)
+
+        if is_multiindex:
+            _first_col = data.columns[0]
+
+            # Detectar formato pela primeira coluna
+            if _first_col[0] in ('Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close'):
+                # FORMATO ANTIGO: ('Close', 'SYMBOL')
+                col_key = ('Close', yf_symbol)
+                alt_key = (yf_symbol, 'Close')
+            else:
+                # FORMATO NOVO: ('SYMBOL', 'Close') - yfinance >= 1.3.0
+                col_key = (yf_symbol, 'Close')
+                alt_key = ('Close', yf_symbol)
+
+            # Tentar formato principal
+            try:
+                series = data[col_key].dropna()
+                if len(series) > 0:
+                    return series
+            except (KeyError, TypeError):
+                pass
+
+            # Tentar formato alternativo
+            try:
+                series = data[alt_key].dropna()
+                if len(series) > 0:
+                    return series
+            except (KeyError, TypeError):
+                pass
+
+            # Busca exaustiva
+            for col in data.columns:
+                try:
+                    if len(col) == 2:
+                        if (col[1] == 'Close' and yf_symbol in str(col[0])) or \
+                           (col[0] == 'Close' and yf_symbol in str(col[1])):
+                            series = data[col].dropna()
+                            if len(series) > 0:
+                                return series
+                except Exception:
+                    continue
+
+            return None
+
+        elif is_multi_ticker:
+            try:
+                ticker_data = data[yf_symbol]
+                if isinstance(ticker_data, pd.DataFrame):
+                    return ticker_data['Close'].dropna()
+                elif isinstance(ticker_data, pd.Series):
+                    return ticker_data.dropna()
+            except (KeyError, TypeError):
+                pass
+            try:
+                series = data[(yf_symbol, 'Close')].dropna()
+                if len(series) > 0:
+                    return series
+            except (KeyError, TypeError):
+                pass
+            return None
+
+        else:
+            # Single ticker
+            try:
+                return data['Close'].dropna()
+            except (KeyError, TypeError):
+                return None
+
     @staticmethod
     def download_batch(symbols: dict, period: str = "1mo") -> Dict[str, dict]:
         """
-        Usa yf.download para buscar multiplos ativos de uma vez.
-        v10.2: Timeout explicito + fallback para fetch individual.
-        v9.1: Periodo padrao alterado para "1mo" para ETFs brasileiros.
-        Handles new yfinance MultiIndex columns format + timeout.
+        Busca dados em lote. v11.0: SEM timeout invalido no yf.download,
+        compativel com yfinance 1.3.0, fallback individual robusto.
         """
-        if not YF_AVAILABLE:
+        if not YF_AVAILABLE or not symbols:
             return {}
-        
-        if not symbols:
-            return {}
-        
+
         results = {}
         failed_symbols = []
-        
-        # v10.2: Tentar batch com timeout
+
+        # Tentar batch download
         try:
             tickers = list(symbols.values())
             names = list(symbols.keys())
-            
             logger.info(f"YF Batch: Baixando {len(tickers)} ativos...")
-            
-            # Download em lote - with auto_adjust and timeout
-            data = yf.download(tickers, period=period, group_by="ticker", 
-                              threads=True, progress=False,
-                              timeout=YF_BATCH_TIMEOUT)
-            
+
+            # v11.0: NAO passar timeout para yf.download
+            data = yf.download(
+                tickers,
+                period=period,
+                group_by="ticker",
+                threads=True,
+                progress=False,
+            )
+
             if data is not None and not data.empty:
-                # Handle both old and new yfinance column formats
                 is_multi_ticker = len(tickers) > 1
-                is_multiindex = isinstance(data.columns, pd.MultiIndex)
-                
+
                 for name, yf_symbol in symbols.items():
                     try:
-                        close_series = None
-                        
-                        if is_multiindex:
-                            # v10.3.1: yfinance>=1.3.0 uses (symbol, field) format
-                            # Older versions use (field, symbol). Try both.
-                            close_series = None
-                            
-                            # Strategy 1: Detect column format from first column
-                            _first_col = data.columns[0]
-                            if _first_col[0] in ('Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close'):
-                                # OLD format: ('Close', 'SYMBOL')
-                                _col_key = ('Close', yf_symbol)
-                            else:
-                                # NEW format: ('SYMBOL', 'Close') - yfinance >= 1.3.0
-                                _col_key = (yf_symbol, 'Close')
-                            
-                            try:
-                                close_series = data[_col_key].dropna()
-                            except (KeyError, TypeError):
-                                # Fallback: try the other format
-                                _alt_key = (yf_symbol, 'Close') if _col_key[0] == 'Close' else ('Close', yf_symbol)
-                                try:
-                                    close_series = data[_alt_key].dropna()
-                                except (KeyError, TypeError):
-                                    # Last resort: search by string match
-                                    close_cols = [c for c in data.columns if c[1] == 'Close' and yf_symbol in str(c[0])]
-                                    if not close_cols:
-                                        close_cols = [c for c in data.columns if c[0] == 'Close' and yf_symbol in str(c[1])]
-                                    if close_cols:
-                                        close_series = data[close_cols[0]].dropna()
-                        elif is_multi_ticker:
-                            # v10.3.1: Try both access patterns for non-MultiIndex multi-ticker
-                            try:
-                                ticker_data = data[yf_symbol]
-                                close_series = ticker_data['Close'].dropna()
-                            except (KeyError, TypeError):
-                                try:
-                                    close_series = data[(yf_symbol, 'Close')].dropna()
-                                except (KeyError, TypeError):
-                                    pass
-                        else:
-                            try:
-                                close_series = data['Close'].dropna()
-                            except (KeyError, TypeError):
-                                pass
-                        
+                        close_series = YahooFinanceBatch._extract_close_series(
+                            data, yf_symbol, is_multi_ticker
+                        )
+
                         if close_series is None or len(close_series) < 1:
                             failed_symbols.append(name)
                             continue
-                        
+
                         current_price = float(close_series.iloc[-1])
-                        
+
                         result = {
                             "source": "yahoo_finance_batch",
                             "symbol": yf_symbol,
@@ -373,14 +342,13 @@ class YahooFinanceBatch:
                             "current_price": current_price,
                             "timestamp": datetime.now(),
                         }
-                        
+
                         if len(close_series) >= 2:
                             prev_close = float(close_series.iloc[-2])
                             result["previous_close"] = prev_close
                             result["change_pct"] = ((current_price - prev_close) / prev_close) * 100
                             result["change_points"] = current_price - prev_close
                         else:
-                            # v9.1: Para ETFs com 1 candle, tenta fast_info
                             try:
                                 t = yf.Ticker(yf_symbol)
                                 fi_prev = t.fast_info.previous_close
@@ -396,34 +364,34 @@ class YahooFinanceBatch:
                                 result["previous_close"] = None
                                 result["change_pct"] = None
                                 result["change_points"] = None
-                        
+
                         results[name] = result
-                        
+
                     except Exception as e:
                         logger.debug(f"YF Batch: Erro ao processar '{name}': {e}")
                         failed_symbols.append(name)
                         continue
             else:
-                logger.warning("YF Batch: Nenhum dado retornado - tentando fetch individual")
+                logger.warning("YF Batch: Nenhum dado retornado")
                 failed_symbols = list(symbols.keys())
-                
+
         except Exception as e:
-            logger.error(f"YF Batch: Erro no download: {e} - tentando fetch individual")
+            logger.error(f"YF Batch: Erro no download: {e}")
             failed_symbols = list(symbols.keys())
-        
-        # v10.2: FALLBACK INDIVIDUAL para simbolos que falharam no batch
+
+        # FALLBACK INDIVIDUAL para simbolos que falharam no batch
         if failed_symbols:
             logger.info(f"YF Batch: {len(failed_symbols)} ativos falharam no batch, tentando individualmente...")
             yf_source = YahooFinanceSource()
-            
+
             for name in failed_symbols:
                 if name in results:
-                    continue  # Ja temos dados desse
-                
+                    continue
+
                 yf_symbol = symbols.get(name)
                 if not yf_symbol:
                     continue
-                
+
                 try:
                     data = yf_source.get_asset_data(yf_symbol)
                     if data:
@@ -435,18 +403,47 @@ class YahooFinanceBatch:
                         logger.warning(f"YF Individual: '{name}' ({yf_symbol}) sem dados")
                 except Exception as e:
                     logger.warning(f"YF Individual: Erro em '{name}': {e}")
-        
-        # v10.2: Log de diagnostico
+
+        # Log diagnostico
         total = len(symbols)
         success = len(results)
         still_missing = [n for n in symbols if n not in results]
-        
+
         if success > 0:
-            logger.info(f"YF: {success}/{total} ativos com dados ({still_missing} sem dados)")
+            logger.info(f"YF: {success}/{total} ativos com dados")
         else:
-            logger.error(f"YF: NENHUM dado obtido de {total} ativos! Possivel problema de conexao.")
-        
-        if still_missing and len(still_missing) <= 5:
+            logger.error(f"YF: NENHUM dado obtido de {total} ativos!")
+
+        if still_missing and len(still_missing) <= 10:
             logger.warning(f"YF: Ativos sem dados: {still_missing}")
-        
+
+        return results
+
+
+class YahooFinanceIndividual:
+    """
+    v11.0: Fetch individual como alternativa ao batch.
+    Mais lento mas MUITO mais robusto.
+    Usa YahooFinanceSource.get_asset_data para cada simbolo.
+    """
+
+    @staticmethod
+    def fetch_all(symbols: dict) -> Dict[str, dict]:
+        """Busca dados de todos os simbolos individualmente."""
+        if not YF_AVAILABLE or not symbols:
+            return {}
+
+        results = {}
+        yf_source = YahooFinanceSource()
+
+        for name, yf_symbol in symbols.items():
+            try:
+                data = yf_source.get_asset_data(yf_symbol)
+                if data:
+                    data["internal_name"] = name
+                    results[name] = data
+            except Exception as e:
+                logger.debug(f"YF Individual: Erro em '{name}': {e}")
+
+        logger.info(f"YF Individual: {len(results)}/{len(symbols)} ativos com dados")
         return results
